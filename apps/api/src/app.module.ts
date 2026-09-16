@@ -21,6 +21,9 @@ import { InventoriesModule } from './modules/inventories/inventories.module';
 import { BouquetsModule } from './modules/bouquets/bouquets.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { WarehouseModule } from './modules/warehouse/warehouse.module';
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { AddressModule } from './modules/address/address.module';
+import { SettingsModule } from './modules/settings/settings.module';
 
 @Module({
   imports: [
@@ -131,9 +134,12 @@ import { WarehouseModule } from './modules/warehouse/warehouse.module';
     EmployeesModule,
     ProductsModule,
     SuppliesModule,
+    SuppliersModule,
     InventoriesModule,
     BouquetsModule,
     OrdersModule,
+    AddressModule,
+    SettingsModule,
     AuditModule,
     HealthModule,
   ],

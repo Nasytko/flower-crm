@@ -12,6 +12,16 @@ import { HealthService } from './health.service';
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
+  /** Process liveness (no DB). Suitable for Docker/kube liveness probes. */
+  @Public()
+  @Get('live')
+  @ApiOperation({ summary: 'Process liveness (does not check PostgreSQL)' })
+  @ApiResponse({ status: 200, description: 'API process is up' })
+  getLive(): { status: 'ok' } {
+    return { status: 'ok' };
+  }
+
+  /** Readiness: API + PostgreSQL. Docker healthcheck should use this. */
   @Public()
   @Get()
   @ApiOperation({ summary: 'Check API process and PostgreSQL availability' })

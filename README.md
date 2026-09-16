@@ -14,18 +14,18 @@
 - **Phase 8** — reservations / shortages / completion COGS
 - **Phase 9** — hardening (UX polish, cross-module invalidation, live e2e, docs)
 
-Платежи, CRM и публичный API сайта — вне текущего контура. Документы: [`docs/architecture.md`](docs/architecture.md), [`docs/business-workflows.md`](docs/business-workflows.md), [`docs/orders.md`](docs/orders.md), [`docs/reservations.md`](docs/reservations.md), [`docs/bouquets.md`](docs/bouquets.md), [`docs/inventory.md`](docs/inventory.md), [`docs/supplies.md`](docs/supplies.md).
+Платежи, CRM и публичный API сайта — вне текущего контура. Документы: [`docs/architecture.md`](docs/architecture.md), [`docs/business-workflows.md`](docs/business-workflows.md), [`docs/orders.md`](docs/orders.md), [`docs/reservations.md`](docs/reservations.md), [`docs/bouquets.md`](docs/bouquets.md), [`docs/inventory.md`](docs/inventory.md), [`docs/supplies.md`](docs/supplies.md), [`docs/deployment.md`](docs/deployment.md).
 
 ## Стек
 
-| Слой        | Технологии                                          |
-| ----------- | --------------------------------------------------- |
-| Frontend    | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui |
-| Backend     | NestJS, REST, Swagger/OpenAPI                       |
-| Database    | PostgreSQL, Prisma ORM                              |
-| Monorepo    | pnpm workspaces, Turborepo                          |
-| Local infra | Docker Compose только для PostgreSQL                |
-| CI          | GitHub Actions                                      |
+| Слой        | Технологии                                             |
+| ----------- | ------------------------------------------------------ |
+| Frontend    | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui    |
+| Backend     | NestJS, REST, Swagger/OpenAPI                          |
+| Database    | PostgreSQL, Prisma ORM                                 |
+| Monorepo    | pnpm workspaces, Turborepo                             |
+| Local infra | Docker Compose (dev: Postgres; prod: web+api+Postgres) |
+| CI          | GitHub Actions                                         |
 
 Backend — самостоятельное приложение. Frontend не нужен для запуска API. В будущем интернет-магазин сможет отправлять заказы в CRM через API, не используя Next.js.
 
@@ -266,7 +266,8 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - [Permissions](docs/permissions.md)
 - [Audit](docs/audit.md)
 - [Orders](docs/orders.md) / [Reservations](docs/reservations.md) / [Supplies](docs/supplies.md) / [Inventory](docs/inventory.md) / [Bouquets](docs/bouquets.md)
+- [Production deployment](docs/deployment.md)
 
 ## Что ещё не реализовано
 
-Платежи, CRM-клиенты, публичный каталог/API магазина, trusted devices, MFA, полноценный Playwright UI E2E, деплой на VPS.
+Платежи, CRM-клиенты, публичный каталог/API магазина, trusted devices, MFA, полноценный Playwright UI E2E. Production deploy на VPS — ручной (см. `docs/deployment.md`); CI/CD-автодеплой не настроен.

@@ -3,9 +3,17 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ProductType, type SupplyDetail } from '@erp/shared';
+import { Permission, ProductType, SupplyStatus, type SupplyDetail } from '@erp/shared';
+import { useAuth } from '@/lib/auth/auth-context';
 import { listProducts } from '@/lib/api/products';
-import { createSupply, postSupply, updateSupply } from '@/lib/api/supplies';
+import {
+  createSupply,
+  markSupplyPaid,
+  markSupplyUnpaid,
+  postSupply,
+  updateSupply,
+} from '@/lib/api/supplies';
+import { listSupplierOptions } from '@/lib/api/suppliers';
 import { getActiveInventory } from '@/lib/api/inventories';
 import { queryKeys } from '@/lib/query-keys';
 import { invalidateStockViews } from '@/lib/query-invalidation';
@@ -14,9 +22,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/ui/page-header';
 import { ProductPicker } from '@/components/ui/product-picker';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { StickyActionBar } from '@/components/ui/sticky-action-bar';
 import { ApiClientError } from '@/lib/api/client';
 import { userFacingError } from '@/lib/api/error-messages';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
 interface LineDraft {
@@ -47,9 +57,15 @@ export function SupplyEditor({
 }): ReactElement {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canPost = hasPermission(Permission.SUPPLIES_POST);
   const [documentDate, setDocumentDate] = useState(initial?.documentDate ?? todayIso());
-  const [supplierName, setSupplierName] = useState(initial?.supplierName ?? '');
+  const [supplierId, setSupplierId] = useState(initial?.supplierId ?? '');
+  const [paymentDueDate, setPaymentDueDate] = useState(initial?.paymentDueDate ?? '');
   const [comment, setComment] = useState(initial?.comment ?? '');
+  const [isPaid, setIsPaid] = useState(Boolean(initial?.isPaid));
+  const [paidAt, setPaidAt] = useState(initial?.paidAt ?? null);
+  const [paidByName, setPaidByName] = useState(initial?.paidByName ?? null);
   const [lines, setLines] = useState<LineDraft[]>(
     initial?.items.map((item, index) => ({
       key: `${item.id}-${index}`,
@@ -66,6 +82,11 @@ export function SupplyEditor({
     queryFn: () => listProducts({ type: ProductType.FLOWER, isActive: 'true', limit: 100 }),
   });
 
+  const suppliersQuery = useQuery({
+    queryKey: queryKeys.supplierOptions,
+    queryFn: listSupplierOptions,
+  });
+
   const activeInventoryQuery = useQuery({
     queryKey: queryKeys.activeInventory,
     queryFn: getActiveInventory,
@@ -73,6 +94,18 @@ export function SupplyEditor({
   const stockFrozen = Boolean(activeInventoryQuery.data);
 
   const flowers = flowersQuery.data?.items ?? [];
+  const supplierOptions = useMemo(() => {
+    const options = (suppliersQuery.data ?? []).map((s) => ({ value: s.id, label: s.name }));
+    if (
+      initial?.supplierId &&
+      initial.supplierName &&
+      !options.some((o) => o.value === initial.supplierId)
+    ) {
+      options.unshift({ value: initial.supplierId, label: initial.supplierName });
+    }
+    return options;
+  }, [suppliersQuery.data, initial?.supplierId, initial?.supplierName]);
+
   const selectedProductIds = useMemo(
     () => lines.map((line) => line.productId).filter(Boolean),
     [lines],
@@ -92,6 +125,13 @@ export function SupplyEditor({
 
   const saveMutation = useMutation({
     mutationFn: async (andPost: boolean) => {
+      if (!supplierId) {
+        throw new ApiClientError(400, {
+          code: 'VALIDATION_ERROR',
+          message: 'Выберите поставщика',
+          details: {},
+        });
+      }
       const items = lines
         .filter((l) => l.productId)
         .map((l) => ({
@@ -116,21 +156,19 @@ export function SupplyEditor({
         }
       }
 
+      const payload = {
+        documentDate,
+        supplierId,
+        paymentDueDate: paymentDueDate.trim() || null,
+        comment: comment.trim() || null,
+        items,
+      };
+
       let supply: SupplyDetail;
       if (mode === 'create') {
-        supply = await createSupply({
-          documentDate,
-          supplierName: supplierName.trim() || null,
-          comment: comment.trim() || null,
-          items,
-        });
+        supply = await createSupply(payload);
       } else {
-        supply = await updateSupply(initial!.id, {
-          documentDate,
-          supplierName: supplierName.trim() || null,
-          comment: comment.trim() || null,
-          items,
-        });
+        supply = await updateSupply(initial!.id, payload);
       }
 
       if (andPost) {
@@ -153,7 +191,27 @@ export function SupplyEditor({
     },
   });
 
+  const paidMutation = useMutation({
+    mutationFn: async (markPaid: boolean) => {
+      const id = initial!.id;
+      return markPaid ? markSupplyPaid(id) : markSupplyUnpaid(id);
+    },
+    onSuccess: async (supply) => {
+      setIsPaid(supply.isPaid);
+      setPaidAt(supply.paidAt);
+      setPaidByName(supply.paidByName);
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ['supplies'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.supply(supply.id) });
+    },
+    onError: (err) => {
+      setError(userFacingError(err, 'Ошибка изменения оплаты'));
+    },
+  });
+
   const activeInventory = activeInventoryQuery.data ?? null;
+  const showPaymentActions =
+    Boolean(initial) && initial!.status !== SupplyStatus.CANCELLED && canPost;
 
   const updateLine = (key: string, patch: Partial<LineDraft>) => {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -252,7 +310,7 @@ export function SupplyEditor({
 
       {error ? <p className="text-sm text-danger-fg">{error}</p> : null}
 
-      <section className="grid grid-cols-1 gap-4 rounded-[28px] border border-border bg-card p-4 sm:p-6 md:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 rounded-[28px] border border-border bg-card p-4 sm:p-6 md:grid-cols-2 lg:grid-cols-4">
         <div className="space-y-2">
           <Label htmlFor="supply-date">Дата поставки</Label>
           <Input
@@ -263,12 +321,24 @@ export function SupplyEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="supply-supplier">Поставщик</Label>
+          <Label htmlFor="supply-supplier">Поставщик *</Label>
+          <SearchableSelect
+            ariaLabel="Поставщик"
+            value={supplierId}
+            onChange={setSupplierId}
+            options={supplierOptions}
+            placeholder="Выберите поставщика…"
+            emptyText="Нет активных поставщиков"
+            triggerClassName="h-11 rounded-full px-4"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="supply-due">Крайняя дата оплаты</Label>
           <Input
-            id="supply-supplier"
-            value={supplierName}
-            onChange={(e) => setSupplierName(e.target.value)}
-            placeholder="Необязательно"
+            id="supply-due"
+            type="date"
+            value={paymentDueDate}
+            onChange={(e) => setPaymentDueDate(e.target.value)}
           />
         </div>
         <div className="space-y-2">
@@ -276,6 +346,51 @@ export function SupplyEditor({
           <Input id="supply-comment" value={comment} onChange={(e) => setComment(e.target.value)} />
         </div>
       </section>
+
+      {initial && initial.status !== SupplyStatus.CANCELLED ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-border bg-card px-5 py-4 text-sm">
+          <div>
+            <p className="font-medium">
+              Оплата:{' '}
+              <span className={cn(isPaid ? 'text-success-fg' : 'text-warn-fg')}>
+                {isPaid ? 'Оплачена' : 'Не оплачена'}
+              </span>
+            </p>
+            {isPaid && paidAt ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {new Date(paidAt).toLocaleString('ru-RU')}
+                {paidByName ? ` · ${paidByName}` : ''}
+              </p>
+            ) : paymentDueDate ? (
+              <p className="mt-1 text-xs text-muted-foreground">Крайняя дата: {paymentDueDate}</p>
+            ) : null}
+          </div>
+          {showPaymentActions ? (
+            <div className="flex flex-wrap gap-2">
+              {isPaid ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-10"
+                  disabled={paidMutation.isPending}
+                  onClick={() => paidMutation.mutate(false)}
+                >
+                  Снять оплату
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  className="min-h-10"
+                  disabled={paidMutation.isPending}
+                  onClick={() => paidMutation.mutate(true)}
+                >
+                  Отметить оплаченной
+                </Button>
+              )}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="overflow-hidden rounded-[28px] border border-border bg-card">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-4 sm:px-6">

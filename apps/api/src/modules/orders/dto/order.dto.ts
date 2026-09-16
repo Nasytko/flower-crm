@@ -15,12 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  DiscountType,
-  FulfillmentType,
-  OrderItemType,
-  OrderStatus,
-} from '@erp/shared';
+import { DiscountType, FulfillmentType, OrderItemType, OrderStatus } from '@erp/shared';
 
 function emptyToNull({ value }: { value: unknown }): unknown {
   if (value === '' || value === undefined) return null;

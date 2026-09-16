@@ -1,35 +1,65 @@
+'use client';
+
 import type { ReactElement } from 'react';
 import Link from 'next/link';
+import { Permission } from '@erp/shared';
+import { useAuth } from '@/lib/auth/auth-context';
 
-const MODULES = [
-  {
-    href: '/app/orders',
-    title: 'Заказы',
-    description: 'Kanban по дате исполнения, резервы и статусы',
-  },
-  {
-    href: '/app/warehouse',
-    title: 'Склад',
-    description: 'Номенклатура, остатки, резерв и списания',
-  },
-  {
-    href: '/app/supplies',
-    title: 'Поставки',
-    description: 'Приход цветов и партии FIFO',
-  },
-  {
-    href: '/app/inventories',
-    title: 'Инвентаризация',
-    description: 'Сверка факта со снимком, заморозка склада',
-  },
-  {
-    href: '/app/bouquets',
-    title: 'Букеты',
-    description: 'Рецепты состава без отдельного остатка',
-  },
-] as const;
+type HomeTile = {
+  href: string;
+  title: string;
+  description: string;
+};
 
 export default function AppHomePage(): ReactElement {
+  const { hasPermission } = useAuth();
+
+  const modules: HomeTile[] = [
+    {
+      href: '/app/orders',
+      title: 'Заказы',
+      description: 'Kanban по дате исполнения, резервы и статусы',
+    },
+    {
+      href: '/app/warehouse',
+      title: 'Склад',
+      description: 'Номенклатура, остатки, резерв и списания',
+    },
+    {
+      href: '/app/supplies',
+      title: 'Поставки',
+      description: 'Приход цветов и партии FIFO',
+    },
+    ...(hasPermission(Permission.SUPPLIES_VIEW)
+      ? [
+          {
+            href: '/app/suppliers',
+            title: 'Поставщики',
+            description: 'Справочник поставщиков для прихода',
+          },
+        ]
+      : []),
+    {
+      href: '/app/inventories',
+      title: 'Инвентаризация',
+      description: 'Сверка факта со снимком, заморозка склада',
+    },
+    {
+      href: '/app/bouquets',
+      title: 'Букеты',
+      description: 'Рецепты состава без отдельного остатка',
+    },
+    ...(hasPermission(Permission.SETTINGS_MANAGE)
+      ? [
+          {
+            href: '/app/settings',
+            title: 'Настройки',
+            description: 'Системный статус и параметры окружения',
+          },
+        ]
+      : []),
+  ];
+
   return (
     <section className="max-w-3xl space-y-6">
       <div className="space-y-2">
@@ -41,7 +71,7 @@ export default function AppHomePage(): ReactElement {
       </div>
 
       <ul className="grid gap-3 sm:grid-cols-2">
-        {MODULES.map((item) => (
+        {modules.map((item) => (
           <li key={item.href}>
             <Link
               href={item.href}

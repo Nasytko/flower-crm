@@ -89,6 +89,28 @@ export class SuppliesController {
     return this.suppliesService.cancel(actor, id, dto, this.contextFrom(request));
   }
 
+  @Post(':id/mark-paid')
+  @RequirePermissions(Permission.SUPPLIES_POST)
+  @ApiOperation({ summary: 'Mark supply as paid' })
+  markPaid(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Req() request: Request,
+  ) {
+    return this.suppliesService.markPaid(actor, id, this.contextFrom(request));
+  }
+
+  @Post(':id/mark-unpaid')
+  @RequirePermissions(Permission.SUPPLIES_POST)
+  @ApiOperation({ summary: 'Clear paid status on supply' })
+  markUnpaid(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Req() request: Request,
+  ) {
+    return this.suppliesService.markUnpaid(actor, id, this.contextFrom(request));
+  }
+
   private contextFrom(request: Request) {
     const requestIdHeader = request.headers[REQUEST_ID_HEADER];
     return {

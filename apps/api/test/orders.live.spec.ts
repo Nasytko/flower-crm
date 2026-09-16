@@ -4,7 +4,7 @@ import {
   Unit,
   OrderItemType,
   FulfillmentType,
-    OrderStatus,
+  OrderStatus,
   DiscountType,
   Permission,
   roleHasPermission,

@@ -73,6 +73,7 @@ model User {
   suppliesCreated          Supply[]           @relation("SupplyCreator")
   suppliesPosted           Supply[]           @relation("SupplyPoster")
   suppliesCancelled        Supply[]           @relation("SupplyCanceller")
+  suppliesMarkedPaid       Supply[]           @relation("SupplyPaidBy")
   inventoriesCreated       InventorySession[] @relation("InventoryCreator")
   inventoriesCompleted     InventorySession[] @relation("InventoryCompleter")
   inventoryItemsCounted    InventoryItem[]    @relation("InventoryItemCounter")
@@ -192,12 +193,34 @@ model StockMovement {
   @@map("stock_movements")
 }
 
+/// Master data for supply vendors. Supply keeps a name snapshot for history.
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  phone     String?
+  comment   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplies Supply[]
+
+  @@index([isActive, name])
+  @@map("suppliers")
+}
+
 model Supply {
   id                   String       @id @default(cuid())
   number               Int          @unique
   status               SupplyStatus @default(DRAFT)
   documentDate         DateTime     @db.Date
-  supplierName         String?
+  /// Required FK to suppliers. Snapshot name kept for historical display.
+  supplierId           String
+  supplierName         String
+  /// Last day to pay the invoice (business calendar date).
+  paymentDueDate       DateTime?    @db.Date
+  paidAt               DateTime?
+  paidByUserId         String?
   comment              String?
   correctionOfSupplyId String?
   correctionReason     String?
@@ -209,17 +232,22 @@ model Supply {
   postedAt             DateTime?
   cancelledAt          DateTime?
 
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   correctionOf Supply?  @relation("SupplyCorrection", fields: [correctionOfSupplyId], references: [id], onDelete: Restrict)
   corrections  Supply[] @relation("SupplyCorrection")
 
   createdBy   User  @relation("SupplyCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   postedBy    User? @relation("SupplyPoster", fields: [postedByUserId], references: [id], onDelete: SetNull)
   cancelledBy User? @relation("SupplyCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  paidBy      User? @relation("SupplyPaidBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
 
   items SupplyItem[]
 
   @@index([status])
   @@index([documentDate])
+  @@index([supplierId])
+  @@index([paymentDueDate])
+  @@index([paidAt])
   @@index([correctionOfSupplyId])
   @@index([createdAt])
   @@map("supplies")

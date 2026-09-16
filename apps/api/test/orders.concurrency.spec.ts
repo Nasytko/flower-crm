@@ -4,7 +4,7 @@ import {
   Unit,
   OrderItemType,
   FulfillmentType,
-    OrderStatus,
+  OrderStatus,
   StockMovementType,
 } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
@@ -115,16 +115,20 @@ describe('Orders concurrency (live DB)', () => {
 
   afterAll(async () => {
     try {
-      const relatedOrders = await prisma.order.findMany({
-        where: {
-          OR: [
-            { id: { in: orderIds } },
-            { createdByUserId: directorId || undefined },
-            { items: { some: { OR: [{ productId }, { bouquetId }] } } },
-          ],
-        },
-        select: { id: true },
-      });
+      const orderOr: Array<Record<string, unknown>> = [];
+      if (orderIds.length) orderOr.push({ id: { in: orderIds } });
+      if (directorId) orderOr.push({ createdByUserId: directorId });
+      const itemOr: Array<Record<string, unknown>> = [];
+      if (productId) itemOr.push({ productId });
+      if (bouquetId) itemOr.push({ bouquetId });
+      if (itemOr.length) orderOr.push({ items: { some: { OR: itemOr } } });
+
+      const relatedOrders = orderOr.length
+        ? await prisma.order.findMany({
+            where: { OR: orderOr },
+            select: { id: true },
+          })
+        : [];
       const ids = [...new Set([...orderIds, ...relatedOrders.map((o) => o.id)])];
       if (ids.length) {
         await prisma.stockReservation.deleteMany({ where: { orderId: { in: ids } } });
@@ -152,7 +156,9 @@ describe('Orders concurrency (live DB)', () => {
         });
         await prisma.orderItem.deleteMany({ where: { orderId: { in: ids } } });
         await prisma.auditLog.deleteMany({
-          where: { OR: [{ entityId: { in: ids } }, { actorUserId: directorId || undefined }] },
+          where: {
+            OR: [{ entityId: { in: ids } }, ...(directorId ? [{ actorUserId: directorId }] : [])],
+          },
         });
         await prisma.order.deleteMany({ where: { id: { in: ids } } });
       }
@@ -172,6 +178,9 @@ describe('Orders concurrency (live DB)', () => {
         await prisma.auditLog.deleteMany({ where: { actorUserId: directorId } });
         await prisma.user.delete({ where: { id: directorId } }).catch(() => undefined);
       }
+    } catch (error) {
+      // Cleanup must not fail the suite after assertions already passed.
+      console.warn('orders.concurrency afterAll cleanup failed', error);
     } finally {
       await prisma.$disconnect();
     }

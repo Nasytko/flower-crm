@@ -4,7 +4,7 @@ import {
   Unit,
   OrderItemType,
   FulfillmentType,
-    OrderStatus,
+  OrderStatus,
   StockMovementType,
   StockLotSource,
   InventoryStatus,

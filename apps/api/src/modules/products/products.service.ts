@@ -5,6 +5,7 @@ import {
   ProductType,
   Role,
   StockMovementType,
+  SupplyStatus,
   roleHasPermission,
   type ProductListResult,
   type StockMovementListItem,
@@ -26,6 +27,7 @@ import {
   WriteOffStockDto,
 } from './dto/product.dto';
 import { parseMoneyInput, toPublicProduct } from './product-mapper';
+import { buildSkuBaseFromName, nextUniqueSku } from './sku';
 
 const productInclude = {
   stock: true,
@@ -61,8 +63,15 @@ export class ProductsService {
       }),
     ]);
 
+    const supplyCounts = await this.supplyCountsForProducts(rows.map((r) => r.id));
+
     return {
-      items: rows.map((row) => toPublicProduct(row, { includePurchasePrice })),
+      items: rows.map((row) =>
+        toPublicProduct(row, {
+          includePurchasePrice,
+          supplyCount: supplyCounts.get(row.id) ?? 0,
+        }),
+      ),
       total,
       page,
       limit,
@@ -78,7 +87,11 @@ export class ProductsService {
     if (!product) {
       throw new AppError('PRODUCT_NOT_FOUND', 'Товар не найден', {}, HttpStatus.NOT_FOUND);
     }
-    return toPublicProduct(product, { includePurchasePrice });
+    const supplyCounts = await this.supplyCountsForProducts([id]);
+    return toPublicProduct(product, {
+      includePurchasePrice,
+      supplyCount: supplyCounts.get(id) ?? 0,
+    });
   }
 
   async create(actor: AuthenticatedUser, dto: CreateProductDto, context: RequestContext) {
@@ -96,11 +109,11 @@ export class ProductsService {
       purchasePrice = null;
     }
 
-    const sku = this.normalizeOptionalText(dto.sku);
     const description = this.normalizeOptionalText(dto.description);
 
     try {
       const created = await this.prisma.$transaction(async (tx) => {
+        const sku = await this.allocateSku(tx, dto.name.trim());
         const product = await tx.product.create({
           data: {
             name: dto.name.trim(),
@@ -133,7 +146,7 @@ export class ProductsService {
           actorUserId: actor.id,
           entityType: 'Product',
           entityId: product.id,
-          after: toPublicProduct(full, { includePurchasePrice: true }),
+          after: toPublicProduct(full, { includePurchasePrice: true, supplyCount: 0 }),
           context,
           tx,
         });
@@ -141,7 +154,10 @@ export class ProductsService {
         return full;
       });
 
-      return toPublicProduct(created, { includePurchasePrice: this.canViewPurchasePrice(actor) });
+      return toPublicProduct(created, {
+        includePurchasePrice: this.canViewPurchasePrice(actor),
+        supplyCount: 0,
+      });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw new AppError('PRODUCT_SKU_ALREADY_EXISTS', 'SKU уже занят', {}, HttpStatus.CONFLICT);
@@ -192,7 +208,7 @@ export class ProductsService {
           where: { id },
           data: {
             ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-            ...(dto.sku !== undefined ? { sku: this.normalizeOptionalText(dto.sku) } : {}),
+            // SKU is auto-generated on create and not editable via UI.
             ...(dto.description !== undefined
               ? { description: this.normalizeOptionalText(dto.description) }
               : {}),
@@ -224,7 +240,11 @@ export class ProductsService {
         return product;
       });
 
-      return toPublicProduct(updated, { includePurchasePrice: this.canViewPurchasePrice(actor) });
+      const supplyCounts = await this.supplyCountsForProducts([id]);
+      return toPublicProduct(updated, {
+        includePurchasePrice: this.canViewPurchasePrice(actor),
+        supplyCount: supplyCounts.get(id) ?? 0,
+      });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw new AppError('PRODUCT_SKU_ALREADY_EXISTS', 'SKU уже занят', {}, HttpStatus.CONFLICT);
@@ -470,6 +490,39 @@ export class ProductsService {
 
   private canViewPurchasePrice(actor: AuthenticatedUser): boolean {
     return roleHasPermission(actor.role as Role, Permission.PURCHASE_PRICE_VIEW);
+  }
+
+  private async allocateSku(tx: Prisma.TransactionClient, name: string): Promise<string> {
+    const base = buildSkuBaseFromName(name);
+    const existing = await tx.product.findMany({
+      where: {
+        sku: { startsWith: base, mode: 'insensitive' },
+      },
+      select: { sku: true },
+    });
+    const taken = new Set(
+      existing.map((row) => (row.sku ?? '').toUpperCase()).filter((sku) => sku.length > 0),
+    );
+    return nextUniqueSku(base, taken);
+  }
+
+  private async supplyCountsForProducts(productIds: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (productIds.length === 0) return map;
+
+    const rows = await this.prisma.supplyItem.findMany({
+      where: {
+        productId: { in: productIds },
+        supply: { status: SupplyStatus.POSTED },
+      },
+      select: { productId: true, supplyId: true },
+      distinct: ['productId', 'supplyId'],
+    });
+
+    for (const row of rows) {
+      map.set(row.productId, (map.get(row.productId) ?? 0) + 1);
+    }
+    return map;
   }
 
   private normalizeOptionalText(value: string | null | undefined): string | null {

@@ -42,6 +42,7 @@ const supplyDetailInclude = {
   createdBy: { select: { id: true, name: true } },
   postedBy: { select: { id: true, name: true } },
   cancelledBy: { select: { id: true, name: true } },
+  paidBy: { select: { id: true, name: true } },
   correctionOf: { select: { id: true, number: true } },
   corrections: {
     where: { status: SupplyStatus.POSTED },
@@ -102,6 +103,7 @@ export class SuppliesService {
   async create(actor: AuthenticatedUser, dto: CreateSupplyDto, context: RequestContext) {
     const items = this.parseItems(dto.items);
     await this.assertFlowerProducts(items.map((i) => i.productId));
+    const supplier = await this.requireActiveSupplier(dto.supplierId);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const number = await this.nextSupplyNumber(tx);
@@ -110,7 +112,9 @@ export class SuppliesService {
           number,
           status: SupplyStatus.DRAFT,
           documentDate: new Date(dto.documentDate),
-          supplierName: dto.supplierName ?? null,
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          paymentDueDate: dto.paymentDueDate ? new Date(dto.paymentDueDate) : null,
           comment: dto.comment ?? null,
           createdByUserId: actor.id,
           items: {
@@ -146,6 +150,9 @@ export class SuppliesService {
     dto: UpdateSupplyDto,
     context: RequestContext,
   ) {
+    const supplier =
+      dto.supplierId !== undefined ? await this.requireActiveSupplier(dto.supplierId) : null;
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const locked = await this.lockSupply(tx, id);
       if (locked.status !== SupplyStatus.DRAFT) {
@@ -178,7 +185,12 @@ export class SuppliesService {
         where: { id },
         data: {
           ...(dto.documentDate !== undefined ? { documentDate: new Date(dto.documentDate) } : {}),
-          ...(dto.supplierName !== undefined ? { supplierName: dto.supplierName } : {}),
+          ...(supplier
+            ? { supplierId: supplier.id, supplierName: supplier.name }
+            : {}),
+          ...(dto.paymentDueDate !== undefined
+            ? { paymentDueDate: dto.paymentDueDate ? new Date(dto.paymentDueDate) : null }
+            : {}),
           ...(dto.comment !== undefined ? { comment: dto.comment } : {}),
         },
       });
@@ -271,7 +283,9 @@ export class SuppliesService {
           number,
           status: SupplyStatus.DRAFT,
           documentDate: original.documentDate,
+          supplierId: original.supplierId,
           supplierName: original.supplierName,
+          paymentDueDate: original.paymentDueDate,
           comment: original.comment,
           correctionOfSupplyId: original.id,
           correctionReason: dto.reason,
@@ -632,12 +646,15 @@ export class SuppliesService {
         number: number;
         correctionOfSupplyId: string | null;
         documentDate: Date;
-        supplierName: string | null;
+        supplierId: string;
+        supplierName: string;
+        paymentDueDate: Date | null;
         comment: string | null;
         correctionReason: string | null;
       }>
     >`
-      SELECT id, status, number, "correctionOfSupplyId", "documentDate", "supplierName", comment, "correctionReason"
+      SELECT id, status, number, "correctionOfSupplyId", "documentDate",
+             "supplierId", "supplierName", "paymentDueDate", comment, "correctionReason"
       FROM supplies
       WHERE id = ${id}
       FOR UPDATE
@@ -646,6 +663,83 @@ export class SuppliesService {
       throw new AppError('SUPPLY_NOT_FOUND', 'Поставка не найдена', {}, HttpStatus.NOT_FOUND);
     }
     return rows[0]!;
+  }
+
+  private async requireActiveSupplier(supplierId: string) {
+    const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!supplier) {
+      throw new AppError('SUPPLIER_NOT_FOUND', 'Поставщик не найден', {}, HttpStatus.NOT_FOUND);
+    }
+    if (!supplier.isActive) {
+      throw new AppError(
+        'SUPPLIER_INACTIVE',
+        'Нельзя выбрать неактивного поставщика',
+        {},
+        HttpStatus.CONFLICT,
+      );
+    }
+    return supplier;
+  }
+
+  async markPaid(actor: AuthenticatedUser, id: string, context: RequestContext) {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const supply = await this.lockSupply(tx, id);
+      if (supply.status === SupplyStatus.CANCELLED) {
+        throw new AppError(
+          'SUPPLY_CANCELLED',
+          'Нельзя отметить оплату у отменённой поставки',
+          {},
+          HttpStatus.CONFLICT,
+        );
+      }
+      const full = await tx.supply.update({
+        where: { id },
+        data: {
+          paidAt: new Date(),
+          paidByUserId: actor.id,
+        },
+        include: supplyDetailInclude,
+      });
+      await this.audit.log({
+        action: AuditAction.SUPPLY_MARKED_PAID,
+        actorUserId: actor.id,
+        entityType: 'Supply',
+        entityId: id,
+        metadata: { supplyId: id, supplyNumber: full.number },
+        context,
+        tx,
+      });
+      return full;
+    });
+    return this.toDetail(updated, this.canViewPurchasePrice(actor));
+  }
+
+  async markUnpaid(actor: AuthenticatedUser, id: string, context: RequestContext) {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const supply = await this.lockSupply(tx, id);
+      if (!supply) {
+        throw new AppError('SUPPLY_NOT_FOUND', 'Поставка не найдена', {}, HttpStatus.NOT_FOUND);
+      }
+      const full = await tx.supply.update({
+        where: { id },
+        data: {
+          paidAt: null,
+          paidByUserId: null,
+        },
+        include: supplyDetailInclude,
+      });
+      await this.audit.log({
+        action: AuditAction.SUPPLY_MARKED_UNPAID,
+        actorUserId: actor.id,
+        entityType: 'Supply',
+        entityId: id,
+        metadata: { supplyId: id, supplyNumber: full.number },
+        context,
+        tx,
+      });
+      return full;
+    });
+    return this.toDetail(updated, this.canViewPurchasePrice(actor));
   }
 
   private async nextSupplyNumber(tx: Tx): Promise<number> {
@@ -718,7 +812,10 @@ export class SuppliesService {
       number: number;
       status: SupplyStatus | string;
       documentDate: Date;
-      supplierName: string | null;
+      supplierId: string;
+      supplierName: string;
+      paymentDueDate: Date | null;
+      paidAt: Date | null;
       comment: string | null;
       correctionOfSupplyId: string | null;
       createdAt: Date;
@@ -741,7 +838,13 @@ export class SuppliesService {
       numberLabel: formatSupplyNumber(row.number),
       status: row.status as SupplyStatus,
       documentDate: row.documentDate.toISOString().slice(0, 10),
+      supplierId: row.supplierId,
       supplierName: row.supplierName,
+      paymentDueDate: row.paymentDueDate
+        ? row.paymentDueDate.toISOString().slice(0, 10)
+        : null,
+      paidAt: row.paidAt ? row.paidAt.toISOString() : null,
+      isPaid: row.paidAt != null,
       comment: row.comment,
       correctionOfSupplyId: row.correctionOfSupplyId,
       correctionOfNumber: row.correctionOf?.number ?? null,
@@ -764,13 +867,17 @@ export class SuppliesService {
       number: number;
       status: SupplyStatus | string;
       documentDate: Date;
-      supplierName: string | null;
+      supplierId: string;
+      supplierName: string;
+      paymentDueDate: Date | null;
+      paidAt: Date | null;
       comment: string | null;
       correctionOfSupplyId: string | null;
       correctionReason: string | null;
       createdByUserId: string;
       postedByUserId: string | null;
       cancelledByUserId: string | null;
+      paidByUserId: string | null;
       createdAt: Date;
       updatedAt: Date;
       postedAt: Date | null;
@@ -784,6 +891,7 @@ export class SuppliesService {
       }>;
       createdBy: { name: string };
       postedBy: { name: string } | null;
+      paidBy?: { name: string } | null;
       correctionOf: { id: string; number: number } | null;
       corrections: Array<{ id: string; number: number }>;
     },
@@ -817,6 +925,8 @@ export class SuppliesService {
       createdByUserId: row.createdByUserId,
       postedByUserId: row.postedByUserId,
       cancelledByUserId: row.cancelledByUserId,
+      paidByUserId: row.paidByUserId,
+      paidByName: row.paidBy?.name ?? null,
       cancelledAt: row.cancelledAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
       correctedBySupplyId: row.corrections[0]?.id ?? null,

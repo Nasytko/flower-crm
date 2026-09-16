@@ -1,8 +1,14 @@
-import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { defineConfig } from 'prisma/config';
 
-config({ path: resolve(__dirname, '../../.env') });
+// dotenv is optional: local/dev may load ../../.env; production containers inject DATABASE_URL.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const dotenv = require('dotenv') as { config: (opts: { path: string }) => void };
+  dotenv.config({ path: resolve(__dirname, '../../.env') });
+} catch {
+  // ignore missing dotenv in slim production/migrate images
+}
 
 const databaseUrl =
   process.env.DATABASE_URL ??

@@ -50,6 +50,9 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new AppExceptionFilter());
 
+  // Allow Docker SIGTERM to close HTTP connections and run OnModuleDestroy (Prisma).
+  app.enableShutdownHooks();
+
   if (!config.isProduction) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Flower CRM API')
@@ -64,10 +67,11 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  await app.listen(config.apiPort);
+  // Bind all interfaces inside the container; host Compose maps 127.0.0.1 only.
+  await app.listen(config.apiPort, '0.0.0.0');
 
   const logger = new Logger('Bootstrap');
-  logger.log(`API listening on http://localhost:${config.apiPort}`);
+  logger.log(`API listening on 0.0.0.0:${config.apiPort}`);
   if (!config.isProduction) {
     logger.log(`Swagger available at http://localhost:${config.apiPort}/api/v1/docs`);
   }

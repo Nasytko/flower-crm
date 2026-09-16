@@ -186,6 +186,12 @@ export enum AuditAction {
   SUPPLY_CANCELLED = 'SUPPLY_CANCELLED',
   SUPPLY_CORRECTION_CREATED = 'SUPPLY_CORRECTION_CREATED',
   SUPPLY_CORRECTED = 'SUPPLY_CORRECTED',
+  SUPPLY_MARKED_PAID = 'SUPPLY_MARKED_PAID',
+  SUPPLY_MARKED_UNPAID = 'SUPPLY_MARKED_UNPAID',
+  SUPPLIER_CREATED = 'SUPPLIER_CREATED',
+  SUPPLIER_UPDATED = 'SUPPLIER_UPDATED',
+  SUPPLIER_DEACTIVATED = 'SUPPLIER_DEACTIVATED',
+  SUPPLIER_REACTIVATED = 'SUPPLIER_REACTIVATED',
   INVENTORY_CREATED = 'INVENTORY_CREATED',
   INVENTORY_STARTED = 'INVENTORY_STARTED',
   INVENTORY_COMPLETED = 'INVENTORY_COMPLETED',
@@ -301,6 +307,12 @@ export interface ProductListItem {
    * Omitted without purchase_price.view.
    */
   averagePurchaseCost?: MoneyString | null;
+  /** Min unit purchase price among remaining costed lots. */
+  minPurchaseCost?: MoneyString | null;
+  /** Max unit purchase price among remaining costed lots. */
+  maxPurchaseCost?: MoneyString | null;
+  /** Distinct posted supplies that included this product. */
+  supplyCount?: number;
   /** True when remaining lots include unknown purchase cost. Omitted without purchase_price.view. */
   hasUncostedStock?: boolean;
   salePrice: MoneyString | null;
@@ -357,13 +369,35 @@ export interface SupplyItemDto {
   lineTotal?: MoneyString;
 }
 
+export interface SupplierListItem {
+  id: string;
+  name: string;
+  phone: string | null;
+  comment: string | null;
+  isActive: boolean;
+  supplyCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupplierListResult {
+  items: SupplierListItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface SupplyListItem {
   id: string;
   number: number;
   numberLabel: string;
   status: SupplyStatus;
   documentDate: string;
-  supplierName: string | null;
+  supplierId: string;
+  supplierName: string;
+  paymentDueDate: string | null;
+  paidAt: string | null;
+  isPaid: boolean;
   comment: string | null;
   correctionOfSupplyId: string | null;
   correctionOfNumber: number | null;
@@ -388,11 +422,30 @@ export interface SupplyDetail extends SupplyListItem {
   createdByUserId: string;
   postedByUserId: string | null;
   cancelledByUserId: string | null;
+  paidByUserId: string | null;
+  paidByName: string | null;
   cancelledAt: string | null;
   updatedAt: string;
   correctedBySupplyId: string | null;
   correctedByNumber: number | null;
   items: SupplyItemDto[];
+}
+
+export interface SystemSettingsDto {
+  health: HealthResponse;
+  businessTimeZone: string;
+  nodeEnv: string;
+  webUrl: string;
+  apiPrefix: string;
+}
+
+export interface AddressSuggestionDto {
+  label: string;
+  addressText: string;
+  latitude: number | null;
+  longitude: number | null;
+  provider: string;
+  providerPlaceId: string | null;
 }
 
 export interface InventoryItemDto {

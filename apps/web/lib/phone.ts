@@ -165,10 +165,7 @@ export function parseStoredPhone(stored: string): {
 }
 
 /** Cap national digits while typing; strip leading dial if user pasted full intl. */
-export function normalizeNationalInput(
-  countryId: PhoneCountryId,
-  input: string,
-): string {
+export function normalizeNationalInput(countryId: PhoneCountryId, input: string): string {
   let d = digitsOnly(input);
   const country = getPhoneCountry(countryId);
 

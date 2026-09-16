@@ -11,6 +11,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -56,12 +57,17 @@ export class CreateSupplyDto {
   @IsDateString()
   documentDate!: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ description: 'Supplier id from suppliers directory' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  supplierId!: string;
+
+  @ApiPropertyOptional({ description: 'ISO date YYYY-MM-DD', nullable: true })
   @Transform(({ value }) => emptyToNull(value))
   @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  supplierName?: string | null;
+  @IsDateString()
+  paymentDueDate?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @Transform(({ value }) => emptyToNull(value))
@@ -84,12 +90,19 @@ export class UpdateSupplyDto {
   @IsDateString()
   documentDate?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  supplierId?: string;
+
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @Transform(({ value }) => emptyToNull(value))
-  @IsString()
-  @MaxLength(200)
-  supplierName?: string | null;
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @IsDateString()
+  paymentDueDate?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()

@@ -46,6 +46,26 @@ describe('validateEnv', () => {
     ).toThrow(/JWT_ACCESS_SECRET must be at least 32 characters/);
   });
 
+  it('rejects known example JWT secrets in production', () => {
+    expect(() =>
+      validateEnv({
+        ...validEnv,
+        NODE_ENV: 'production',
+        JWT_ACCESS_SECRET: 'local-dev-access-secret-change-me-32chars',
+      }),
+    ).toThrow(/known development\/example value/);
+  });
+
+  it('allows a strong JWT secret in production', () => {
+    expect(
+      validateEnv({
+        ...validEnv,
+        NODE_ENV: 'production',
+        JWT_ACCESS_SECRET: 'prod-strong-secret-value-at-least-32-chars!!',
+      }).NODE_ENV,
+    ).toBe('production');
+  });
+
   it('rejects an invalid database URL', () => {
     expect(() =>
       validateEnv({

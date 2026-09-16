@@ -73,6 +73,9 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
     ...(hasPermission(Permission.SUPPLIES_VIEW)
       ? [{ href: '/app/supplies', label: 'Поставки', icon: '▤' }]
       : []),
+    ...(hasPermission(Permission.SUPPLIES_VIEW)
+      ? [{ href: '/app/suppliers', label: 'Поставщики', icon: '◎' }]
+      : []),
     ...(hasPermission(Permission.INVENTORY_VIEW)
       ? [{ href: '/app/inventories', label: 'Инвентаризация', icon: '☑' }]
       : []),
@@ -81,6 +84,9 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
       : []),
     ...(hasPermission(Permission.EMPLOYEES_VIEW)
       ? [{ href: '/app/employees', label: 'Сотрудники', icon: '☺' }]
+      : []),
+    ...(hasPermission(Permission.SETTINGS_MANAGE)
+      ? [{ href: '/app/settings', label: 'Настройки', icon: '⚙' }]
       : []),
   ];
 

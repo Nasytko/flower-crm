@@ -154,24 +154,10 @@ export function WarehousePage(): ReactElement {
 
   return (
     <div className="min-w-0 space-y-4">
-      <PageHeader
-        title="Склад"
-        description="Номенклатура, остатки и списания"
-        actions={
-          canManage ? (
-            <Button
-              type="button"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => setCreateOpen(true)}
-            >
-              + Товар
-            </Button>
-          ) : null
-        }
-      />
+      <PageHeader title="Склад" description="Номенклатура, остатки и списания" />
 
       <ListToolbar>
-        <ToolbarRow>
+        <ToolbarRow className="gap-1.5">
           <ToolbarSearch
             id="warehouse-search"
             value={search}
@@ -211,8 +197,12 @@ export function WarehousePage(): ReactElement {
           <Button type="button" variant="soft" className="h-10" onClick={applySearch}>
             Найти
           </Button>
-        </ToolbarRow>
-        <ToolbarRow divided className="gap-1.5">
+          {canManage ? (
+            <Button type="button" className="h-10" onClick={() => setCreateOpen(true)}>
+              + Товар
+            </Button>
+          ) : null}
+          <ToolbarDivider />
           {canCreateSupplies && !stockFrozen ? (
             <Link href="/app/supplies/new" className={secondaryLinkClass}>
               Поставка
@@ -222,7 +212,6 @@ export function WarehousePage(): ReactElement {
           ) : (
             <ToolbarGhost label="Поставка" />
           )}
-
           {canViewSupplies ? (
             <Link href="/app/supplies" className={secondaryLinkClass}>
               Поставки
@@ -230,9 +219,6 @@ export function WarehousePage(): ReactElement {
           ) : (
             <ToolbarGhost label="Поставки" />
           )}
-
-          <ToolbarDivider />
-
           {canViewInventory ? (
             <Link
               href={activeInventory ? `/app/inventories/${activeInventory.id}` : '/app/inventories'}
@@ -523,7 +509,16 @@ export function WarehousePage(): ReactElement {
           title="Новый товар"
           submitLabel="Создать"
           onClose={() => setCreateOpen(false)}
-          onSubmit={(values) => createMutation.mutate(values)}
+          onSubmit={(values) =>
+            createMutation.mutate({
+              name: values.name,
+              type: values.type,
+              unit: values.unit,
+              description: values.description,
+              purchasePrice: values.purchasePrice,
+              salePrice: values.salePrice,
+            })
+          }
           pending={createMutation.isPending}
           allowType
           canViewPurchase={canViewPurchase}
@@ -541,7 +536,6 @@ export function WarehousePage(): ReactElement {
               id: editing.id,
               data: {
                 name: values.name,
-                sku: values.sku,
                 description: values.description,
                 purchasePrice:
                   editing.type === ProductType.SERVICE ? values.purchasePrice : undefined,
@@ -615,7 +609,30 @@ function purchaseCostLabel(product: ProductListItem, isFlower: boolean): ReactNo
     );
   }
   if (isFlower && product.averagePurchaseCost != null) {
-    return `${product.averagePurchaseCost} BYN`;
+    const hasRange =
+      product.minPurchaseCost != null &&
+      product.maxPurchaseCost != null &&
+      (product.minPurchaseCost !== product.maxPurchaseCost ||
+        (product.supplyCount != null && product.supplyCount > 0));
+    const rangeParts: string[] = [];
+    if (product.minPurchaseCost != null && product.maxPurchaseCost != null) {
+      rangeParts.push(
+        product.minPurchaseCost === product.maxPurchaseCost
+          ? product.minPurchaseCost
+          : `${product.minPurchaseCost}–${product.maxPurchaseCost}`,
+      );
+    }
+    if (product.supplyCount != null && product.supplyCount > 0) {
+      rangeParts.push(`${product.supplyCount} пост.`);
+    }
+    return (
+      <div className="leading-tight">
+        <div>{product.averagePurchaseCost} BYN</div>
+        {hasRange && rangeParts.length > 0 ? (
+          <div className="text-[11px] text-muted-foreground">{rangeParts.join(' · ')}</div>
+        ) : null}
+      </div>
+    );
   }
   return '—';
 }
@@ -752,7 +769,6 @@ function ProductFormDialog({
   onClose: () => void;
   onSubmit: (values: {
     name: string;
-    sku?: string | null;
     type: ProductType;
     unit: Unit;
     description?: string | null;
@@ -764,12 +780,12 @@ function ProductFormDialog({
   canViewPurchase: boolean;
 }): ReactElement {
   const [name, setName] = useState(product?.name ?? '');
-  const [sku, setSku] = useState(product?.sku ?? '');
   const [type, setType] = useState<ProductType>(product?.type ?? ProductType.FLOWER);
   const [description, setDescription] = useState(product?.description ?? '');
   const [purchasePrice, setPurchasePrice] = useState(product?.purchasePrice ?? '');
   const [salePrice, setSalePrice] = useState(product?.salePrice ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
+  const isEdit = Boolean(product);
 
   const showPurchasePrice =
     canViewPurchase &&
@@ -817,7 +833,6 @@ function ProductFormDialog({
             : product?.type === ProductType.SERVICE;
           onSubmit({
             name: name.trim(),
-            sku: sku.trim() || null,
             type,
             unit: Unit.PIECE,
             description: description.trim() || null,
@@ -835,10 +850,18 @@ function ProductFormDialog({
             required
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="product-sku">SKU</Label>
-          <Input id="product-sku" value={sku} onChange={(e) => setSku(e.target.value)} />
-        </div>
+        {isEdit ? (
+          <div className="space-y-2">
+            <Label htmlFor="product-sku">SKU</Label>
+            <Input
+              id="product-sku"
+              value={product?.sku ?? ''}
+              readOnly
+              disabled
+              className="opacity-80"
+            />
+          </div>
+        ) : null}
         {allowType ? (
           <div className="space-y-2">
             <Label htmlFor="product-type">Тип *</Label>

@@ -4,7 +4,7 @@ import {
   Unit,
   OrderItemType,
   FulfillmentType,
-    OrderStatus,
+  OrderStatus,
   StockMovementType,
 } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
@@ -90,28 +90,35 @@ describe('Phase 8 reservations (live DB)', () => {
 
   afterAll(async () => {
     try {
-      const relatedOrders = await prisma.order.findMany({
-        where: {
-          OR: [
-            { id: { in: orderIds } },
-            { createdByUserId: directorId || undefined },
-            { items: { some: { productId: { in: productIds } } } },
-          ],
-        },
-        select: { id: true },
-      });
+      const orderOr: Array<Record<string, unknown>> = [];
+      if (orderIds.length) orderOr.push({ id: { in: orderIds } });
+      if (directorId) orderOr.push({ createdByUserId: directorId });
+      if (productIds.length) {
+        orderOr.push({ items: { some: { productId: { in: productIds } } } });
+      }
+
+      const relatedOrders = orderOr.length
+        ? await prisma.order.findMany({
+            where: { OR: orderOr },
+            select: { id: true },
+          })
+        : [];
       const ids = [...new Set([...orderIds, ...relatedOrders.map((o) => o.id)])];
 
       if (ids.length) {
         await prisma.stockReservation.deleteMany({ where: { orderId: { in: ids } } });
       }
 
-      const movements = await prisma.stockMovement.findMany({
-        where: {
-          OR: [{ productId: { in: productIds } }, { sourceId: { in: [...ids, ...supplyIds] } }],
-        },
-        select: { id: true },
-      });
+      const movementOr: Array<Record<string, unknown>> = [];
+      if (productIds.length) movementOr.push({ productId: { in: productIds } });
+      const sourceIds = [...ids, ...supplyIds];
+      if (sourceIds.length) movementOr.push({ sourceId: { in: sourceIds } });
+      const movements = movementOr.length
+        ? await prisma.stockMovement.findMany({
+            where: { OR: movementOr },
+            select: { id: true },
+          })
+        : [];
       const movementIds = movements.map((m) => m.id);
       if (movementIds.length) {
         await prisma.stockMovementLotAllocation.deleteMany({
@@ -119,10 +126,12 @@ describe('Phase 8 reservations (live DB)', () => {
         });
       }
 
-      const lots = await prisma.stockLot.findMany({
-        where: { productId: { in: productIds } },
-        select: { id: true },
-      });
+      const lots = productIds.length
+        ? await prisma.stockLot.findMany({
+            where: { productId: { in: productIds } },
+            select: { id: true },
+          })
+        : [];
       const lotIds = lots.map((l) => l.id);
       if (lotIds.length) {
         await prisma.stockMovementLotAllocation.deleteMany({
@@ -134,7 +143,10 @@ describe('Phase 8 reservations (live DB)', () => {
       if (movementIds.length || productIds.length) {
         await prisma.stockMovement.deleteMany({
           where: {
-            OR: [{ id: { in: movementIds } }, { productId: { in: productIds } }],
+            OR: [
+              ...(movementIds.length ? [{ id: { in: movementIds } }] : []),
+              ...(productIds.length ? [{ productId: { in: productIds } }] : []),
+            ],
           },
         });
       }
@@ -145,7 +157,9 @@ describe('Phase 8 reservations (live DB)', () => {
         });
         await prisma.orderItem.deleteMany({ where: { orderId: { in: ids } } });
         await prisma.auditLog.deleteMany({
-          where: { OR: [{ entityId: { in: ids } }, { actorUserId: directorId || undefined }] },
+          where: {
+            OR: [{ entityId: { in: ids } }, ...(directorId ? [{ actorUserId: directorId }] : [])],
+          },
         });
         await prisma.order.deleteMany({ where: { id: { in: ids } } });
       }
@@ -164,6 +178,8 @@ describe('Phase 8 reservations (live DB)', () => {
         await prisma.auditLog.deleteMany({ where: { actorUserId: directorId } });
         await prisma.user.delete({ where: { id: directorId } }).catch(() => undefined);
       }
+    } catch (error) {
+      console.warn('reservations.live afterAll cleanup failed', error);
     } finally {
       await prisma.$disconnect();
     }

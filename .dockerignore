@@ -1,0 +1,68 @@
+# Git / CI
+.git
+.github
+.gitignore
+.gitattributes
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and caches
+node_modules
+**/.turbo
+**/.eslintcache
+**/.prettiercache
+**/coverage
+**/.nyc_output
+
+# Build outputs (rebuilt inside images)
+**/.next
+**/dist
+apps/**/build
+**/*.tsbuildinfo
+
+# Prisma generated client (regenerated during image build)
+packages/database/src/generated
+
+# Tests / e2e artifacts
+**/test-results
+**/playwright-report
+apps/web/e2e
+**/*.spec.ts
+**/jest.config.*
+
+# Local tooling / dumps / uploads
+.tools
+postgres-data
+docker-data
+*.sql.gz
+*.dump
+uploads
+tmp
+temp
+logs
+*.log
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+*.swp
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+
+# Docs / deploy host files are not needed inside app images
+docs
+deploy/nginx
+deploy/scripts
+README.md
+
+# API tests are not needed in runtime images (migrate uses prisma only)
+apps/api/test

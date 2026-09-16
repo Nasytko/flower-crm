@@ -6,6 +6,8 @@ export const queryKeys = {
   stockMovements: (id: string) => ['products', id, 'movements'] as const,
   supplies: (params?: Record<string, unknown>) => ['supplies', params ?? {}] as const,
   supply: (id: string) => ['supplies', id] as const,
+  suppliers: (params?: Record<string, unknown>) => ['suppliers', params ?? {}] as const,
+  supplierOptions: ['suppliers', 'options'] as const,
   inventories: (params?: Record<string, unknown>) => ['inventories', params ?? {}] as const,
   inventory: (id: string) => ['inventories', id] as const,
   activeInventory: ['inventories', 'active'] as const,
@@ -14,4 +16,5 @@ export const queryKeys = {
   businessTime: ['orders', 'business-time'] as const,
   orders: (params?: Record<string, unknown>) => ['orders', params ?? {}] as const,
   order: (id: string) => ['orders', id] as const,
+  systemSettings: ['settings', 'system'] as const,
 };

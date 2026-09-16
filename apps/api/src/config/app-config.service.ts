@@ -57,4 +57,13 @@ export class AppConfigService {
   get businessTimeZone(): string {
     return this.configService.get('BUSINESS_TIME_ZONE', { infer: true });
   }
+
+  get yandexMapsApiKey(): string | undefined {
+    return this.configService.get('YANDEX_MAPS_API_KEY', { infer: true });
+  }
+
+  /** Optional Suggest bias center as "lon,lat". */
+  get yandexSuggestLl(): string | undefined {
+    return this.configService.get('YANDEX_SUGGEST_LL', { infer: true });
+  }
 }

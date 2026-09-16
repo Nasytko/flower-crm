@@ -73,6 +73,25 @@ export function computeAveragePurchaseCost(
   return totalValue.div(totalQty).toFixed(2);
 }
 
+export function computeMinMaxPurchaseCost(
+  lots: Array<{ remainingQuantity: number; unitPurchasePrice: Prisma.Decimal | null }>,
+): { min: string | null; max: string | null } {
+  if (hasUncostedRemainingStock(lots)) {
+    return { min: null, max: null };
+  }
+  let min: Prisma.Decimal | null = null;
+  let max: Prisma.Decimal | null = null;
+  for (const lot of lots) {
+    if (lot.remainingQuantity <= 0 || lot.unitPurchasePrice === null) continue;
+    if (min === null || lot.unitPurchasePrice.lessThan(min)) min = lot.unitPurchasePrice;
+    if (max === null || lot.unitPurchasePrice.greaterThan(max)) max = lot.unitPurchasePrice;
+  }
+  return {
+    min: min ? min.toFixed(2) : null,
+    max: max ? max.toFixed(2) : null,
+  };
+}
+
 export function toPublicProduct(
   product: {
     id: string;
@@ -89,7 +108,7 @@ export function toPublicProduct(
     stock?: { quantityOnHand: number; quantityReserved: number } | null;
     lots?: Array<{ remainingQuantity: number; unitPurchasePrice: Prisma.Decimal | null }>;
   },
-  options: { includePurchasePrice: boolean },
+  options: { includePurchasePrice: boolean; supplyCount?: number },
 ): ProductListItem {
   const type = product.type as ProductType;
   const base: ProductListItem = {
@@ -106,6 +125,10 @@ export function toPublicProduct(
     updatedAt: product.updatedAt.toISOString(),
   };
 
+  if (type === ProductType.FLOWER && options.supplyCount !== undefined) {
+    base.supplyCount = options.supplyCount;
+  }
+
   if (options.includePurchasePrice) {
     if (type === ProductType.SERVICE) {
       base.purchasePrice = decimalToMoneyString(product.purchasePrice);
@@ -113,6 +136,9 @@ export function toPublicProduct(
       const lots = product.lots ?? [];
       base.hasUncostedStock = hasUncostedRemainingStock(lots);
       base.averagePurchaseCost = computeAveragePurchaseCost(lots);
+      const { min, max } = computeMinMaxPurchaseCost(lots);
+      base.minPurchaseCost = min;
+      base.maxPurchaseCost = max;
     }
   }
 

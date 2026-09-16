@@ -25,10 +25,7 @@ export class AuthService {
     const identifier = dto.login.trim();
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { login: identifier },
-          { email: { equals: identifier, mode: 'insensitive' } },
-        ],
+        OR: [{ login: identifier }, { email: { equals: identifier, mode: 'insensitive' } }],
       },
     });
 

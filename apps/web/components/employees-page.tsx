@@ -38,12 +38,7 @@ const createSchema = z
       .string()
       .min(2)
       .regex(/^[a-zA-Z0-9._-]+$/),
-    email: z
-      .string()
-      .trim()
-      .email('Некорректный email')
-      .or(z.literal(''))
-      .optional(),
+    email: z.string().trim().email('Некорректный email').or(z.literal('')).optional(),
     role: z.nativeEnum(Role),
     password: z.string().min(8),
     confirmPassword: z.string().min(8),
@@ -143,10 +138,7 @@ export function EmployeesPage(): ReactElement {
   });
 
   const rows = useMemo(() => employeesQuery.data ?? [], [employeesQuery.data]);
-  const activeSessions = useMemo(
-    () => rows.filter((row) => row.hasActiveSession).length,
-    [rows],
-  );
+  const activeSessions = useMemo(() => rows.filter((row) => row.hasActiveSession).length, [rows]);
   const anyMutationPending =
     createMutation.isPending ||
     updateMutation.isPending ||
@@ -235,7 +227,9 @@ export function EmployeesPage(): ReactElement {
                 disabled={anyMutationPending}
               />
               {createForm.formState.errors.email ? (
-                <p className="text-sm text-danger-fg">{createForm.formState.errors.email.message}</p>
+                <p className="text-sm text-danger-fg">
+                  {createForm.formState.errors.email.message}
+                </p>
               ) : null}
             </div>
             <div className="space-y-2">

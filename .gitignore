@@ -1,10 +1,10 @@
 # Dependencies
 node_modules/
+.pnpm-store/
 
 # Environment and secrets
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 # Build outputs
@@ -34,7 +34,13 @@ yarn-error.log*
 # OS / editor
 .DS_Store
 Thumbs.db
+desktop.ini
+ehthumbs.db
 *.swp
+*.bak
+*.tmp
+*.orig
+*.rej
 .idea/
 .vscode/*
 !.vscode/extensions.json
@@ -44,9 +50,11 @@ Thumbs.db
 .eslintcache
 .prettiercache
 
-# Database dumps and local data
+# Database dumps and local data (keep Prisma migrations under packages/database/prisma/migrations)
 *.sql.gz
 *.dump
+backup*.sql
+dump*.sql
 postgres-data/
 docker-data/
 
@@ -72,4 +80,3 @@ apps/web/CLAUDE.md
 
 apps/web/playwright-report/
 apps/web/test-results/
-

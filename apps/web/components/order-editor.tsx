@@ -30,6 +30,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ProductPicker } from '@/components/ui/product-picker';
 import { PhoneInput } from '@/components/ui/phone-input';
+import { AddressSuggestInput } from '@/components/ui/address-suggest-input';
 import { FilterSelect, SearchableSelect } from '@/components/ui/searchable-select';
 import { StickyActionBar } from '@/components/ui/sticky-action-bar';
 import { TimeSelect } from '@/components/ui/time-select';
@@ -152,7 +153,13 @@ export function OrderEditor({
   const [timeRangeChecked, setTimeRangeChecked] = useState(Boolean(initial?.fulfillmentTimeTo));
   const [recipientName, setRecipientName] = useState(initial?.recipientName ?? '');
   const [recipientPhone, setRecipientPhone] = useState(initial?.recipientPhone ?? '');
-  const [deliveryAddress, setDeliveryAddress] = useState(initial?.deliveryAddressText ?? '');
+  const [deliveryAddress, setDeliveryAddress] = useState({
+    addressText: initial?.deliveryAddressText ?? '',
+    latitude: initial?.deliveryLatitude ?? null,
+    longitude: initial?.deliveryLongitude ?? null,
+    provider: initial?.deliveryProvider ?? null,
+    providerPlaceId: initial?.deliveryProviderPlaceId ?? null,
+  });
   const [deliveryComment, setDeliveryComment] = useState(initial?.deliveryComment ?? '');
   const [orderComment, setOrderComment] = useState(initial?.orderComment ?? '');
   const [discountType, setDiscountType] = useState<DiscountType | ''>(initial?.discountType ?? '');
@@ -324,7 +331,7 @@ export function OrderEditor({
           });
         }
       }
-      if (fulfillmentType === FulfillmentType.DELIVERY && !deliveryAddress.trim()) {
+      if (fulfillmentType === FulfillmentType.DELIVERY && !deliveryAddress.addressText.trim()) {
         throw new ApiClientError(400, {
           code: 'VALIDATION_ERROR',
           message: 'Для доставки укажите адрес',
@@ -342,6 +349,10 @@ export function OrderEditor({
         recipientName: string | null;
         recipientPhone: string | null;
         deliveryAddressText: string | null;
+        deliveryLatitude?: number | null;
+        deliveryLongitude?: number | null;
+        deliveryProvider?: string | null;
+        deliveryProviderPlaceId?: string | null;
         deliveryComment: string | null;
         orderComment: string | null;
         discountType?: DiscountType | null;
@@ -357,7 +368,17 @@ export function OrderEditor({
         recipientName: recipientName.trim() || null,
         recipientPhone: recipientPhone.trim() || null,
         deliveryAddressText:
-          fulfillmentType === FulfillmentType.DELIVERY ? deliveryAddress.trim() || null : null,
+          fulfillmentType === FulfillmentType.DELIVERY
+            ? deliveryAddress.addressText.trim() || null
+            : null,
+        deliveryLatitude:
+          fulfillmentType === FulfillmentType.DELIVERY ? deliveryAddress.latitude : null,
+        deliveryLongitude:
+          fulfillmentType === FulfillmentType.DELIVERY ? deliveryAddress.longitude : null,
+        deliveryProvider:
+          fulfillmentType === FulfillmentType.DELIVERY ? deliveryAddress.provider : null,
+        deliveryProviderPlaceId:
+          fulfillmentType === FulfillmentType.DELIVERY ? deliveryAddress.providerPlaceId : null,
         deliveryComment:
           fulfillmentType === FulfillmentType.DELIVERY ? deliveryComment.trim() || null : null,
         orderComment: orderComment.trim() || null,
@@ -549,25 +570,10 @@ export function OrderEditor({
               />
             </div>
           )}
-          <div className="space-y-2 sm:col-span-2">
-            <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl bg-muted/50 px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-5 accent-[var(--primary)]"
-                checked={!recipientName.trim() && !recipientPhone.trim()}
-                disabled={!editable}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setRecipientName('');
-                    setRecipientPhone('');
-                  } else {
-                    setRecipientName(customerName);
-                    setRecipientPhone(customerPhone);
-                  }
-                }}
-              />
-              <span>Получатель совпадает с заказчиком</span>
-            </label>
+          <div className="space-y-1 sm:col-span-2">
+            <p className="text-sm text-muted-foreground">
+              Если получатель тот же, что заказчик — поля ниже можно не заполнять.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="ord-recipient">Получатель</Label>
@@ -594,12 +600,13 @@ export function OrderEditor({
             <>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="ord-address">Адрес доставки *</Label>
-                <Input
+                <AddressSuggestInput
                   id="ord-address"
+                  aria-label="Адрес доставки"
                   value={deliveryAddress}
                   disabled={!editable}
-                  onChange={(e) => setDeliveryAddress(e.target.value)}
-                  maxLength={500}
+                  onChange={setDeliveryAddress}
+                  placeholder="Начните вводить адрес…"
                 />
               </div>
               <div className="space-y-2 sm:col-span-2">

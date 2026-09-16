@@ -10,6 +10,9 @@
  * and must never be imported into OrdersService.
  */
 
+import type { AddressSuggestionDto } from '@erp/shared';
+import { suggestAddress } from '@/lib/api/address';
+
 export type AddressSuggestion = {
   label: string;
   addressText: string;
@@ -27,6 +30,29 @@ export type AddressSuggestQuery = {
 export interface AddressSuggestionProvider {
   readonly id: string;
   suggest(query: AddressSuggestQuery): Promise<AddressSuggestion[]>;
+}
+
+function fromDto(dto: AddressSuggestionDto): AddressSuggestion {
+  return {
+    label: dto.label,
+    addressText: dto.addressText,
+    latitude: dto.latitude,
+    longitude: dto.longitude,
+    provider: dto.provider,
+    providerPlaceId: dto.providerPlaceId,
+  };
+}
+
+/** Backend address suggestions: Yandex Geosuggest (preferred) or Nominatim fallback. */
+export class ApiAddressProvider implements AddressSuggestionProvider {
+  readonly id = 'api';
+
+  async suggest(query: AddressSuggestQuery): Promise<AddressSuggestion[]> {
+    const q = query.query.trim();
+    if (q.length < 2) return [];
+    const items = await suggestAddress(q, query.limit ?? 7);
+    return items.map(fromDto);
+  }
 }
 
 /** Manual entry only — always available without API keys. */

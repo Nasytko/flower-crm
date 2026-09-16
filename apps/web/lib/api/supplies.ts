@@ -23,7 +23,8 @@ export async function getSupply(id: string): Promise<SupplyDetail> {
 
 export async function createSupply(input: {
   documentDate: string;
-  supplierName?: string | null;
+  supplierId: string;
+  paymentDueDate?: string | null;
   comment?: string | null;
   items: SupplyItemInput[];
 }): Promise<SupplyDetail> {
@@ -37,7 +38,8 @@ export async function updateSupply(
   id: string,
   input: Partial<{
     documentDate: string;
-    supplierName: string | null;
+    supplierId: string;
+    paymentDueDate: string | null;
     comment: string | null;
     items: SupplyItemInput[];
   }>,
@@ -64,6 +66,14 @@ export async function cancelSupply(id: string, reason: string): Promise<SupplyDe
     method: 'POST',
     body: JSON.stringify({ reason }),
   });
+}
+
+export async function markSupplyPaid(id: string): Promise<SupplyDetail> {
+  return apiFetch<SupplyDetail>(`/api/v1/supplies/${id}/mark-paid`, { method: 'POST' });
+}
+
+export async function markSupplyUnpaid(id: string): Promise<SupplyDetail> {
+  return apiFetch<SupplyDetail>(`/api/v1/supplies/${id}/mark-unpaid`, { method: 'POST' });
 }
 
 export type { SupplyStatus };

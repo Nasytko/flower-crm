@@ -6,7 +6,14 @@ import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Permission, SUPPLY_STATUS_LABELS_RU, SupplyStatus } from '@erp/shared';
 import { useAuth } from '@/lib/auth/auth-context';
-import { cancelSupply, correctSupply, getSupply, postSupply } from '@/lib/api/supplies';
+import {
+  cancelSupply,
+  correctSupply,
+  getSupply,
+  markSupplyPaid,
+  markSupplyUnpaid,
+  postSupply,
+} from '@/lib/api/supplies';
 import { queryKeys } from '@/lib/query-keys';
 import { invalidateStockViews } from '@/lib/query-invalidation';
 import { SupplyEditor } from '@/components/supply-editor';
@@ -78,6 +85,16 @@ export default function SupplyDetailPage(): ReactElement {
       await invalidate();
     },
     onError: (err) => setError(userFacingError(err, 'Ошибка отмены')),
+  });
+
+  const paidMutation = useMutation({
+    mutationFn: (markPaid: boolean) => (markPaid ? markSupplyPaid(id) : markSupplyUnpaid(id)),
+    onSuccess: async (supply) => {
+      setMessage(supply.isPaid ? 'Отмечена как оплаченная' : 'Оплата снята');
+      setError(null);
+      await invalidate();
+    },
+    onError: (err) => setError(userFacingError(err, 'Ошибка изменения оплаты')),
   });
 
   if (!bootstrapped || !user || !canView) {
@@ -192,8 +209,46 @@ export default function SupplyDetailPage(): ReactElement {
       {error ? <p className="text-sm text-danger-fg">{error}</p> : null}
 
       <section className="grid gap-3 rounded-[28px] border border-border bg-card p-4 text-sm sm:p-6 md:grid-cols-2">
-        <div>Поставщик: {supply.supplierName ?? '—'}</div>
+        <div>Поставщик: {supply.supplierName || '—'}</div>
         <div>Комментарий: {supply.comment ?? '—'}</div>
+        <div>Крайняя дата оплаты: {supply.paymentDueDate ?? '—'}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span>
+            Оплата:{' '}
+            {supply.status === SupplyStatus.CANCELLED
+              ? '—'
+              : supply.isPaid
+                ? 'Оплачена'
+                : 'Не оплачена'}
+          </span>
+          {supply.status !== SupplyStatus.CANCELLED && canPost ? (
+            supply.isPaid ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={paidMutation.isPending}
+                onClick={() => paidMutation.mutate(false)}
+              >
+                Снять оплату
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                disabled={paidMutation.isPending}
+                onClick={() => paidMutation.mutate(true)}
+              >
+                Отметить оплаченной
+              </Button>
+            )
+          ) : null}
+        </div>
+        {supply.isPaid && supply.paidAt ? (
+          <div>
+            Оплатил: {supply.paidByName ?? '—'} · {new Date(supply.paidAt).toLocaleString('ru-RU')}
+          </div>
+        ) : null}
         <div>Создал: {supply.createdByName}</div>
         <div>Провёл: {supply.postedByName ?? '—'}</div>
         <div>Позиций: {supply.itemCount}</div>

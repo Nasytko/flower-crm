@@ -4,7 +4,7 @@ import {
   Unit,
   OrderItemType,
   FulfillmentType,
-    OrderStatus,
+  OrderStatus,
   StockMovementType,
 } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
