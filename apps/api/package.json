@@ -7,6 +7,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
+    "bootstrap:director": "node dist/bootstrap-director.js",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest --config jest.config.cjs"

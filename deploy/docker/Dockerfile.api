@@ -30,6 +30,9 @@ FROM build AS pruned
 # deploy already pulls workspace packages; avoid cp onto identical hardlinks/symlinks.
 RUN pnpm --filter @erp/api deploy --prod --legacy /app/deployed \
   && if [ ! -f /app/deployed/dist/main.js ]; then cp -a /app/apps/api/dist /app/deployed/dist; fi \
+  && mkdir -p /app/deployed/dist \
+  && cp -a /app/apps/api/dist/bootstrap-director.js /app/deployed/dist/bootstrap-director.js \
+  && test -f /app/deployed/dist/bootstrap-director.js \
   && mkdir -p /app/deployed/node_modules/@erp/database/src \
   && rm -rf /app/deployed/node_modules/@erp/database/src/generated \
   && cp -a /app/packages/database/src/generated /app/deployed/node_modules/@erp/database/src/generated \

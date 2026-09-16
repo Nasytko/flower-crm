@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
-# One-shot initial users bootstrap for an EMPTY production database.
+# One-shot first DIRECTOR bootstrap for an EMPTY production database.
 #
-# Seed refuses NODE_ENV=production. This script runs seed in a controlled
-# one-shot container with NODE_ENV=development against the production Postgres
-# service — ONLY when CONFIRM_PRODUCTION_BOOTSTRAP=YES.
+# Runs the compiled CLI inside the production API image (not development seed).
+# Credentials must be supplied as ephemeral environment variables — never commit them.
 #
-# After bootstrap: log in as director and change the password immediately.
-# Never leave SEED_RESET_PASSWORDS=true on a production server.
+# Required:
+#   CONFIRM_PRODUCTION_BOOTSTRAP=YES
+#   BOOTSTRAP_DIRECTOR_NAME
+#   BOOTSTRAP_DIRECTOR_LOGIN
+#   BOOTSTRAP_DIRECTOR_PASSWORD
+# Optional:
+#   BOOTSTRAP_DIRECTOR_EMAIL
+#
+# Example:
+#   CONFIRM_PRODUCTION_BOOTSTRAP=YES \
+#   BOOTSTRAP_DIRECTOR_NAME='Иван Иванов' \
+#   BOOTSTRAP_DIRECTOR_LOGIN='ivan' \
+#   BOOTSTRAP_DIRECTOR_EMAIL='ivan@example.com' \
+#   BOOTSTRAP_DIRECTOR_PASSWORD='your-strong-password' \
+#   ./deploy/scripts/bootstrap-initial-users.sh
 
 set -Eeuo pipefail
 
@@ -23,16 +35,19 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-echo "[bootstrap] running development seed once against production DB"
-echo "[bootstrap] change director password immediately after first login"
+: "${BOOTSTRAP_DIRECTOR_NAME:?BOOTSTRAP_DIRECTOR_NAME is required}"
+: "${BOOTSTRAP_DIRECTOR_LOGIN:?BOOTSTRAP_DIRECTOR_LOGIN is required}"
+: "${BOOTSTRAP_DIRECTOR_PASSWORD:?BOOTSTRAP_DIRECTOR_PASSWORD is required}"
 
-# Compose injects DATABASE_URL for the migrate service from POSTGRES_*.
-# Override NODE_ENV so seed is allowed; do not enable SEED_RESET_PASSWORDS.
+echo "[bootstrap] creating first DIRECTOR via production API CLI (one-shot)"
+
+# Pass only bootstrap vars + compose service DATABASE_URL; do not print secrets.
 docker compose -f docker-compose.prod.yml run --rm \
-  -e NODE_ENV=development \
-  -e SEED_RESET_PASSWORDS=false \
-  --entrypoint pnpm \
-  migrate \
-  --filter @erp/database seed
+  -e BOOTSTRAP_DIRECTOR_NAME \
+  -e BOOTSTRAP_DIRECTOR_LOGIN \
+  -e BOOTSTRAP_DIRECTOR_EMAIL \
+  -e BOOTSTRAP_DIRECTOR_PASSWORD \
+  api \
+  node dist/bootstrap-director.js
 
-echo "[bootstrap] done"
+echo "[bootstrap] done — change the password after first login if desired"

@@ -111,25 +111,25 @@ curl -fsS http://127.0.0.1:3001/api/v1/health
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
 ```
 
-### Initial users (explicit — not automatic)
+### Initial DIRECTOR (explicit — not automatic)
 
-Seed **refuses** `NODE_ENV=production` and is **not** run on container start.
+Development `prisma/seed` **refuses** `NODE_ENV=production` and is **not** used here.
+API start does **not** auto-create users.
+
+Create the first DIRECTOR once against an empty `User` table (credentials are
+ephemeral env vars — never commit them, never put them in `docker-compose.prod.yml`):
 
 ```bash
-# loads POSTGRES_* from .env via compose
-set -a && source .env && set +a
-CONFIRM_PRODUCTION_BOOTSTRAP=YES ./deploy/scripts/bootstrap-initial-users.sh
+CONFIRM_PRODUCTION_BOOTSTRAP=YES \
+BOOTSTRAP_DIRECTOR_NAME='Your Name' \
+BOOTSTRAP_DIRECTOR_LOGIN='your_login' \
+BOOTSTRAP_DIRECTOR_EMAIL='you@example.com' \
+BOOTSTRAP_DIRECTOR_PASSWORD='your-strong-password-min-10' \
+  ./deploy/scripts/bootstrap-initial-users.sh
 ```
 
-Default seeded logins (change password immediately):
-
-| Login    | Password (dev default) |
-| -------- | ---------------------- |
-| director | Director123!           |
-| manager  | Manager123!            |
-| florist  | Florist123!            |
-
-Emails: `director@flower.local`, etc.
+`BOOTSTRAP_DIRECTOR_EMAIL` is optional. Password rules match employee create
+(min 10 chars). Re-running after any user exists fails safely (one-shot).
 
 ## 4. Host Nginx
 
