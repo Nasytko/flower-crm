@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+.next
+out
+coverage
+.turbo
+.tools
+pnpm-lock.yaml
+packages/database/src/generated
+*.tsbuildinfo
+apps/web/next-env.d.ts
+
+apps/web/playwright-report
+apps/web/test-results
+

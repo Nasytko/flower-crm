@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Prisma generated client
+packages/database/src/generated/
+
+# Tests and coverage
+coverage/
+.nyc_output/
+test-out*.txt
+audit-test-out.txt
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Tooling caches
+.turbo/
+.eslintcache
+.prettiercache
+
+# Database dumps and local data
+*.sql.gz
+*.dump
+postgres-data/
+docker-data/
+
+# Local portable Postgres (smoke-test fallback when Docker is unavailable)
+.tools/
+
+# Runtime uploads
+uploads/
+tmp/
+temp/
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+
+# Next.js generated agent rule files
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
+
+apps/web/playwright-report/
+apps/web/test-results/
+

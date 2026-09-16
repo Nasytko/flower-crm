@@ -1,0 +1,29 @@
+{
+  "name": "flower-crm",
+  "private": true,
+  "packageManager": "pnpm@10.17.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "prettier --check . && turbo run lint",
+    "lint:fix": "prettier --write . && turbo run lint -- --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "pnpm --filter @erp/web test:e2e",
+    "db:generate": "pnpm --filter @erp/database generate",
+    "db:migrate": "pnpm --filter @erp/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @erp/database migrate:deploy",
+    "db:studio": "pnpm --filter @erp/database studio",
+    "db:seed": "pnpm --filter @erp/database seed",
+    "postinstall": "pnpm --filter @erp/database generate"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.10.12",
+    "typescript": "^5.9.2"
+  }
+}

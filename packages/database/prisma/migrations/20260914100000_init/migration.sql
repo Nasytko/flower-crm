@@ -1,0 +1,3 @@
+-- Phase 1 bootstrap migration.
+-- No business tables yet. Prisma still records this migration in
+-- `_prisma_migrations` so later schema changes can be applied incrementally.

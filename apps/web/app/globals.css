@@ -1,0 +1,80 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Reference-inspired: graphite sidebar + acid lime accent (not Stebly brand). */
+  --background: #f4f5f7;
+  --foreground: #141414;
+  --card: #ffffff;
+  --card-foreground: #141414;
+  --muted: #eceef2;
+  --muted-foreground: #6b7280;
+  --border: #e5e7eb;
+  --ring: #b8e600;
+  --primary: #c8f000;
+  --primary-foreground: #141414;
+  --primary-soft: #f3fad0;
+  --sidebar: #0e0f12;
+  --sidebar-foreground: #c9cdd6;
+  --sidebar-muted: #8b919e;
+  --sidebar-active: #c8f000;
+  --sidebar-active-foreground: #141414;
+  --success-soft: #e7f7ee;
+  --success-fg: #1f7a4d;
+  --danger-soft: #fdecee;
+  --danger-fg: #b42318;
+  --warn-soft: #fff4e5;
+  --warn-fg: #b54708;
+  --type-flower-bg: #e8f1ff;
+  --type-flower-fg: #2f5fbf;
+  --type-service-bg: #eaf8ef;
+  --type-service-fg: #1f7a4d;
+  --destructive: #b42318;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-success-fg: var(--success-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-fg: var(--danger-fg);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-fg: var(--warn-fg);
+  --color-type-flower-bg: var(--type-flower-bg);
+  --color-type-flower-fg: var(--type-flower-fg);
+  --color-type-service-bg: var(--type-service-bg);
+  --color-type-service-fg: var(--type-service-fg);
+  --color-destructive: var(--destructive);
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+}
+
+/* Prevent accidental horizontal page scroll from nested overflows. */
+html,
+body {
+  overflow-x: clip;
+}

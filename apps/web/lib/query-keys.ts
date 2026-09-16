@@ -1,0 +1,17 @@
+export const queryKeys = {
+  me: ['auth', 'me'] as const,
+  employees: ['employees'] as const,
+  products: (params?: Record<string, unknown>) => ['products', params ?? {}] as const,
+  product: (id: string) => ['products', id] as const,
+  stockMovements: (id: string) => ['products', id, 'movements'] as const,
+  supplies: (params?: Record<string, unknown>) => ['supplies', params ?? {}] as const,
+  supply: (id: string) => ['supplies', id] as const,
+  inventories: (params?: Record<string, unknown>) => ['inventories', params ?? {}] as const,
+  inventory: (id: string) => ['inventories', id] as const,
+  activeInventory: ['inventories', 'active'] as const,
+  bouquets: (params?: Record<string, unknown>) => ['bouquets', params ?? {}] as const,
+  bouquet: (id: string) => ['bouquets', id] as const,
+  businessTime: ['orders', 'business-time'] as const,
+  orders: (params?: Record<string, unknown>) => ['orders', params ?? {}] as const,
+  order: (id: string) => ['orders', id] as const,
+};

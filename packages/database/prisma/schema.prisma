@@ -1,0 +1,518 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/client"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  FLORIST
+  MANAGER
+  DIRECTOR
+}
+
+enum ProductType {
+  FLOWER
+  SERVICE
+}
+
+enum Unit {
+  PIECE
+}
+
+enum StockMovementType {
+  SUPPLY
+  SUPPLY_REVERSAL
+  SALE
+  WRITE_OFF
+  MANUAL_WRITE_OFF
+  RETURN
+  INVENTORY_ADJUSTMENT
+  MANUAL_ADJUSTMENT
+}
+
+enum SupplyStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum InventoryStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum StockLotSource {
+  SUPPLY
+  INVENTORY
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  login               String    @unique
+  /// Optional; login allowed by email OR login nick.
+  email               String?   @unique
+  passwordHash        String
+  role                Role
+  isActive            Boolean   @default(true)
+  lastLoginAt         DateTime?
+  /// User-Agent string from the most recent successful login.
+  lastLoginUserAgent  String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sessions                 Session[]
+  auditLogs                AuditLog[]         @relation("AuditActor")
+  stockMovements           StockMovement[]    @relation("StockMovementAuthor")
+  suppliesCreated          Supply[]           @relation("SupplyCreator")
+  suppliesPosted           Supply[]           @relation("SupplyPoster")
+  suppliesCancelled        Supply[]           @relation("SupplyCanceller")
+  inventoriesCreated       InventorySession[] @relation("InventoryCreator")
+  inventoriesCompleted     InventorySession[] @relation("InventoryCompleter")
+  inventoryItemsCounted    InventoryItem[]    @relation("InventoryItemCounter")
+  ordersCreated            Order[]            @relation("OrderCreator")
+  ordersUpdated            Order[]            @relation("OrderUpdater")
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model Session {
+  id                String    @id @default(cuid())
+  userId            String
+  tokenHash         String    @unique
+  /// Previous refresh hash kept briefly for reuse/theft detection after rotation.
+  previousTokenHash String?   @unique
+  ipAddress         String?
+  userAgent         String?
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  requestId   String?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model Product {
+  id            String      @id @default(cuid())
+  name          String
+  sku           String?     @unique
+  type          ProductType
+  description   String?
+  unit          Unit
+  /// Cost/reference for SERVICE only. Not authoritative for FLOWER purchase cost.
+  purchasePrice Decimal?    @db.Decimal(12, 2)
+  salePrice     Decimal?    @db.Decimal(12, 2)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  stock          ProductStock?
+  movements      StockMovement[]
+  supplyItems    SupplyItem[]
+  lots           StockLot[]
+  inventoryItems InventoryItem[]
+  bouquetItems   BouquetItem[]
+  orderItemsAsProduct OrderItem[] @relation("OrderItemProduct")
+  orderItemComponents OrderItemComponent[]
+  stockReservations   StockReservation[]
+
+  @@index([type, isActive])
+  @@index([name])
+  @@index([isActive, name])
+  @@map("products")
+}
+
+/// Current warehouse snapshot for FLOWER products only (1:1).
+model ProductStock {
+  productId        String   @id
+  quantityOnHand   Int      @default(0)
+  quantityReserved Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_stocks")
+}
+
+/// Append-only ledger of physical stock changes. quantity is a signed delta.
+model StockMovement {
+  id              String            @id @default(cuid())
+  productId       String
+  type            StockMovementType
+  quantity        Int
+  balanceAfter    Int
+  sourceType      String?
+  sourceId        String?
+  comment         String?
+  createdByUserId String?
+  createdAt       DateTime          @default(now())
+
+  product     Product                      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy   User?                        @relation("StockMovementAuthor", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  allocations StockMovementLotAllocation[]
+
+  @@index([productId, createdAt])
+  @@index([type])
+  @@index([createdAt])
+  @@index([sourceType, sourceId])
+  @@map("stock_movements")
+}
+
+model Supply {
+  id                   String       @id @default(cuid())
+  number               Int          @unique
+  status               SupplyStatus @default(DRAFT)
+  documentDate         DateTime     @db.Date
+  supplierName         String?
+  comment              String?
+  correctionOfSupplyId String?
+  correctionReason     String?
+  createdByUserId      String
+  postedByUserId       String?
+  cancelledByUserId    String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  postedAt             DateTime?
+  cancelledAt          DateTime?
+
+  correctionOf Supply?  @relation("SupplyCorrection", fields: [correctionOfSupplyId], references: [id], onDelete: Restrict)
+  corrections  Supply[] @relation("SupplyCorrection")
+
+  createdBy   User  @relation("SupplyCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  postedBy    User? @relation("SupplyPoster", fields: [postedByUserId], references: [id], onDelete: SetNull)
+  cancelledBy User? @relation("SupplyCanceller", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  items SupplyItem[]
+
+  @@index([status])
+  @@index([documentDate])
+  @@index([correctionOfSupplyId])
+  @@index([createdAt])
+  @@map("supplies")
+}
+
+model SupplyItem {
+  id                String   @id @default(cuid())
+  supplyId          String
+  productId         String
+  quantity          Int
+  unitPurchasePrice Decimal  @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+
+  supply  Supply    @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  lot     StockLot?
+
+  @@index([supplyId])
+  @@index([productId])
+  @@map("supply_items")
+}
+
+/// Physical receipt batch from supply or inventory surplus.
+model StockLot {
+  id                String         @id @default(cuid())
+  productId         String
+  sourceType        StockLotSource
+  supplyItemId      String?        @unique
+  inventoryItemId   String?        @unique
+  receivedQuantity  Int
+  remainingQuantity Int
+  /// Null for inventory surplus (uncosted). Never fake 0.00.
+  unitPurchasePrice Decimal?       @db.Decimal(12, 2)
+  receivedAt        DateTime
+  createdAt         DateTime       @default(now())
+  reversedAt        DateTime?
+
+  product       Product                       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  supplyItem    SupplyItem?                   @relation(fields: [supplyItemId], references: [id], onDelete: Restrict)
+  inventoryItem InventoryItem?                @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  allocations   StockMovementLotAllocation[]
+
+  @@index([productId, receivedAt, createdAt])
+  @@index([sourceType])
+  @@map("stock_lots")
+}
+
+/// Links outbound stock movements to consumed lots (FIFO traceability).
+model StockMovementLotAllocation {
+  id                String   @id @default(cuid())
+  stockMovementId   String
+  stockLotId        String
+  quantity          Int
+  /// Null when consuming an uncosted inventory surplus lot.
+  unitPurchasePrice Decimal? @db.Decimal(12, 2)
+
+  movement StockMovement @relation(fields: [stockMovementId], references: [id], onDelete: Restrict)
+  lot      StockLot      @relation(fields: [stockLotId], references: [id], onDelete: Restrict)
+
+  @@index([stockMovementId])
+  @@index([stockLotId])
+  @@map("stock_movement_lot_allocations")
+}
+
+model InventorySession {
+  id                String          @id @default(cuid())
+  number            Int             @unique
+  status            InventoryStatus @default(DRAFT)
+  comment           String?
+  createdByUserId   String
+  completedByUserId String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  createdBy   User            @relation("InventoryCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  completedBy User?           @relation("InventoryCompleter", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  items       InventoryItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("inventory_sessions")
+}
+
+model InventoryItem {
+  id                String    @id @default(cuid())
+  inventorySessionId String
+  productId         String
+  expectedQuantity  Int
+  countedQuantity   Int?
+  countedByUserId   String?
+  countedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  session   InventorySession @relation(fields: [inventorySessionId], references: [id], onDelete: Restrict)
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  countedBy User?            @relation("InventoryItemCounter", fields: [countedByUserId], references: [id], onDelete: SetNull)
+  lot       StockLot?
+
+  @@unique([inventorySessionId, productId])
+  @@index([inventorySessionId])
+  @@index([productId])
+  @@map("inventory_items")
+}
+
+/// Reusable bouquet recipe/template. NOT physical stock.
+model Bouquet {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  salePrice   Decimal  @db.Decimal(12, 2)
+  isActive    Boolean  @default(true)
+  /// Optimistic concurrency token (not recipe history).
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items BouquetItem[]
+  orderItems OrderItem[] @relation("OrderItemBouquet")
+
+  @@index([isActive])
+  @@index([name])
+  @@index([isActive, name])
+  @@map("bouquets")
+}
+
+model BouquetItem {
+  id        String   @id @default(cuid())
+  bouquetId String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bouquet Bouquet @relation(fields: [bouquetId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([bouquetId, productId])
+  @@index([bouquetId])
+  @@index([productId])
+  @@map("bouquet_items")
+}
+
+enum OrderStatus {
+  NEW
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
+enum OrderItemType {
+  PRODUCT
+  BOUQUET
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+/// Atomic per-day sequence for human-readable Order.number (DDMMYY-NNN).
+model OrderDailyCounter {
+  businessDate DateTime @id @db.Date
+  lastNumber   Int
+  updatedAt    DateTime @updatedAt
+
+  @@map("order_daily_counters")
+}
+
+/// Commercial order document. Phase 8: reservations + FIFO completion mutate warehouse.
+model Order {
+  id                       String          @id @default(cuid())
+  /// Human-readable business number, e.g. 150926-001. Not a PK.
+  number                   String          @unique
+  /// Calendar day used for number allocation (business TZ).
+  numberBusinessDate       DateTime        @db.Date
+  status                   OrderStatus     @default(NEW)
+  /// Optional display name; phone is the primary customer identifier.
+  customerName             String          @default("")
+  customerPhone            String
+  fulfillmentType          FulfillmentType
+  fulfillmentDate          DateTime        @db.Date
+  /// Local wall-clock HH:mm (business day). Not a UTC instant.
+  fulfillmentTimeFrom      String?         @db.VarChar(5)
+  fulfillmentTimeTo        String?         @db.VarChar(5)
+  recipientName            String?
+  recipientPhone           String?
+  deliveryAddressText      String?
+  deliveryLatitude         Decimal?        @db.Decimal(9, 6)
+  deliveryLongitude        Decimal?        @db.Decimal(9, 6)
+  deliveryProvider         String?
+  deliveryProviderPlaceId  String?
+  deliveryComment          String?
+  orderComment             String?
+  subtotal                 Decimal         @db.Decimal(12, 2)
+  discountType             DiscountType?
+  discountValue            Decimal?        @db.Decimal(12, 2)
+  discountAmount           Decimal         @default(0) @db.Decimal(12, 2)
+  total                    Decimal         @db.Decimal(12, 2)
+  /// Snapshot of full FIFO COGS at completion. Null if incomplete / uncosted lots.
+  actualCost               Decimal?        @db.Decimal(12, 2)
+  /// True when completion consumed at least one lot without unitPurchasePrice.
+  hasUncostedConsumption   Boolean         @default(false)
+  version                  Int             @default(1)
+  createdByUserId          String
+  updatedByUserId          String?
+  readyAt                  DateTime?
+  completedAt              DateTime?
+  cancelledAt              DateTime?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  createdBy     User               @relation("OrderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedBy     User?              @relation("OrderUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  items         OrderItem[]
+  reservations  StockReservation[]
+
+  @@index([fulfillmentDate, status])
+  @@index([fulfillmentDate, fulfillmentType])
+  @@index([fulfillmentDate, fulfillmentTimeFrom])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String        @id @default(cuid())
+  orderId      String
+  itemType     OrderItemType
+  productId    String?
+  bouquetId    String?
+  nameSnapshot String
+  quantity     Int
+  unitPrice    Decimal       @db.Decimal(12, 2)
+  lineSubtotal Decimal       @db.Decimal(12, 2)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+
+  order      Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product?             @relation("OrderItemProduct", fields: [productId], references: [id], onDelete: Restrict)
+  bouquet    Bouquet?             @relation("OrderItemBouquet", fields: [bouquetId], references: [id], onDelete: Restrict)
+  components OrderItemComponent[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([bouquetId])
+  @@map("order_items")
+}
+
+/// Frozen bouquet (or future) composition requirement for Phase 8 reservations.
+model OrderItemComponent {
+  id                  String      @id @default(cuid())
+  orderItemId         String
+  productId           String
+  productNameSnapshot String
+  productTypeSnapshot ProductType
+  unitSnapshot        Unit
+  quantityPerItem     Int
+  totalQuantity       Int
+  sortOrder           Int         @default(0)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderItemId])
+  @@index([productId])
+  @@map("order_item_components")
+}
+
+/// Mutable aggregate FLOWER reservation for an Order (not lot-bound).
+/// Active while Order status is NEW or READY. Removed on COMPLETED/CANCELLED.
+model StockReservation {
+  id               String   @id @default(cuid())
+  orderId          String
+  productId        String
+  requiredQuantity Int
+  reservedQuantity Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+  @@index([productId])
+  @@index([orderId])
+  @@map("stock_reservations")
+}
