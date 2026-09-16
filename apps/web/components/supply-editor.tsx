@@ -104,7 +104,7 @@ export function SupplyEditor({
       options.unshift({ value: initial.supplierId, label: initial.supplierName });
     }
     return options;
-  }, [suppliersQuery.data, initial?.supplierId, initial?.supplierName]);
+  }, [suppliersQuery.data, initial]);
 
   const selectedProductIds = useMemo(
     () => lines.map((line) => line.productId).filter(Boolean),

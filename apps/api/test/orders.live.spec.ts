@@ -21,7 +21,7 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { BouquetsService } from '../src/modules/bouquets/bouquets.service';
 import { hashPassword } from '../src/common/security/password';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 import { AppError } from '../src/common/errors/app-error';
 
 describe('Phase 7 orders domain (live DB)', () => {
@@ -60,6 +60,7 @@ describe('Phase 7 orders domain (live DB)', () => {
   let directorId = '';
   let floristId = '';
   let managerId = '';
+  let supplierId = '';
   let ready = false;
   let productId = '';
   let inactiveProductId = '';
@@ -117,6 +118,8 @@ describe('Phase 7 orders domain (live DB)', () => {
     directorId = d.id;
     floristId = f.id;
     managerId = m.id;
+    const supplier = await createTestSupplier(prisma, `Orders Live ${suffix}`);
+    supplierId = supplier.id;
 
     const rose = await products.create(
       director(),
@@ -185,6 +188,9 @@ describe('Phase 7 orders domain (live DB)', () => {
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
       }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
+      }
       if (bouquetId) {
         await prisma.bouquetItem.deleteMany({ where: { bouquetId } });
         await prisma.bouquet.deleteMany({ where: { id: bouquetId } });
@@ -224,6 +230,7 @@ describe('Phase 7 orders domain (live DB)', () => {
       director(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: qty, unitPurchasePrice: '1.00' }],
       },
       {},

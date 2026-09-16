@@ -1,7 +1,4 @@
-import type {
-  SupplierListItem,
-  SupplierListResult,
-} from '@erp/shared';
+import type { SupplierListItem, SupplierListResult } from '@erp/shared';
 import { apiFetch } from './client';
 
 export async function listSuppliers(

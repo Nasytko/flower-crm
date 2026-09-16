@@ -18,7 +18,7 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { BouquetsService } from '../src/modules/bouquets/bouquets.service';
 import { hashPassword } from '../src/common/security/password';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 describe('Orders concurrency (live DB)', () => {
   jest.setTimeout(90_000);
@@ -55,6 +55,7 @@ describe('Orders concurrency (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let directorId = '';
+  let supplierId = '';
   let ready = false;
   let productId = '';
   let bouquetId = '';
@@ -87,6 +88,8 @@ describe('Orders concurrency (live DB)', () => {
       },
     });
     directorId = d.id;
+    const supplier = await createTestSupplier(prisma, `Orders Concurrency ${suffix}`);
+    supplierId = supplier.id;
 
     const rose = await products.create(
       director(),
@@ -166,6 +169,9 @@ describe('Orders concurrency (live DB)', () => {
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
       }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
+      }
       if (bouquetId) {
         await prisma.bouquetItem.deleteMany({ where: { bouquetId } });
         await prisma.bouquet.deleteMany({ where: { id: bouquetId } });
@@ -208,6 +214,7 @@ describe('Orders concurrency (live DB)', () => {
       director(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: qty, unitPurchasePrice: '1.00' }],
       },
       {},

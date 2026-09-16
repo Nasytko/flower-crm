@@ -180,8 +180,7 @@ export class AddressService {
       if (!response.ok) return null;
 
       const data = (await response.json()) as YandexGeocoderResponse;
-      const pos =
-        data.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject?.Point?.pos;
+      const pos = data.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject?.Point?.pos;
       if (!pos) return null;
       const [lonRaw, latRaw] = pos.split(/\s+/);
       const lon = Number(lonRaw);

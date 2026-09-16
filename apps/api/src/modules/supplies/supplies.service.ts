@@ -185,9 +185,7 @@ export class SuppliesService {
         where: { id },
         data: {
           ...(dto.documentDate !== undefined ? { documentDate: new Date(dto.documentDate) } : {}),
-          ...(supplier
-            ? { supplierId: supplier.id, supplierName: supplier.name }
-            : {}),
+          ...(supplier ? { supplierId: supplier.id, supplierName: supplier.name } : {}),
           ...(dto.paymentDueDate !== undefined
             ? { paymentDueDate: dto.paymentDueDate ? new Date(dto.paymentDueDate) : null }
             : {}),
@@ -840,9 +838,7 @@ export class SuppliesService {
       documentDate: row.documentDate.toISOString().slice(0, 10),
       supplierId: row.supplierId,
       supplierName: row.supplierName,
-      paymentDueDate: row.paymentDueDate
-        ? row.paymentDueDate.toISOString().slice(0, 10)
-        : null,
+      paymentDueDate: row.paymentDueDate ? row.paymentDueDate.toISOString().slice(0, 10) : null,
       paidAt: row.paidAt ? row.paidAt.toISOString() : null,
       isPaid: row.paidAt != null,
       comment: row.comment,

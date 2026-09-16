@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NextConfig } from 'next';
 
-const require = createRequire(import.meta.url);
 const configDir = dirname(fileURLToPath(import.meta.url));
 
 function loadRootPublicEnv(): void {
@@ -36,13 +34,6 @@ function loadRootPublicEnv(): void {
 
 loadRootPublicEnv();
 
-function resolvePackage(name: string): string {
-  return dirname(require.resolve(`${name}/package.json`));
-}
-
-const reactPath = resolvePackage('react');
-const reactDomPath = resolvePackage('react-dom');
-
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: false,
@@ -50,23 +41,6 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Production Docker image uses the standalone server output.
   output: 'standalone',
-  // Next 16 defaults to Turbopack in `next dev`; keep an explicit empty/alias
-  // config so the webpack() block below does not abort the dev server.
-  turbopack: {
-    resolveAlias: {
-      react: reactPath,
-      'react-dom': reactDomPath,
-    },
-  },
-  // Prevent duplicate React copies in monorepo Docker builds (breaks prerender).
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      react: reactPath,
-      'react-dom': reactDomPath,
-    };
-    return config;
-  },
 };
 
 export default nextConfig;

@@ -8,7 +8,7 @@ import { WarehouseLockService } from '../src/modules/warehouse/warehouse-lock.se
 import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 describe('Bouquet optimistic concurrency (live DB)', () => {
   const databaseUrl = process.env.DATABASE_URL;
@@ -33,6 +33,7 @@ describe('Bouquet optimistic concurrency (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let directorId = '';
+  let supplierId = '';
   let ready = false;
   let bouquetId = '';
   let roseId = '';
@@ -67,6 +68,8 @@ describe('Bouquet optimistic concurrency (live DB)', () => {
       },
     });
     directorId = d.id;
+    const supplier = await createTestSupplier(prisma, `Bouquets Concurrency ${suffix}`);
+    supplierId = supplier.id;
 
     const rose = await products.create(
       director(),
@@ -86,6 +89,7 @@ describe('Bouquet optimistic concurrency (live DB)', () => {
       director(),
       {
         documentDate: '2026-09-15',
+        supplierId,
         items: [
           { productId: roseId, quantity: 50, unitPurchasePrice: '4.00' },
           { productId: eucalyptusId, quantity: 50, unitPurchasePrice: '3.00' },
@@ -152,6 +156,9 @@ describe('Bouquet optimistic concurrency (live DB)', () => {
         }
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
+      }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
       }
       if (productIds.length > 0) {
         await prisma.productStock.deleteMany({ where: { productId: { in: productIds } } });

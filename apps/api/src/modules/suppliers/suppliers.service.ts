@@ -1,9 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import {
-  AuditAction,
-  type SupplierListItem,
-  type SupplierListResult,
-} from '@erp/shared';
+import { AuditAction, type SupplierListItem, type SupplierListResult } from '@erp/shared';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser, RequestContext } from '../../common/auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';

@@ -123,6 +123,9 @@ describe('ProductsService write-off (unit)', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    supplyItem: {
+      findMany: jest.fn(),
+    },
     stockLot: {
       update: jest.fn(),
     },
@@ -158,13 +161,15 @@ describe('ProductsService write-off (unit)', () => {
     prismaMock.$transaction.mockImplementation(
       async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
     );
+    prismaMock.product.findMany.mockResolvedValue([]);
+    prismaMock.supplyItem.findMany.mockResolvedValue([]);
   });
 
   it('creates FLOWER with zero stock and no purchasePrice', async () => {
     const created = {
       id: 'flower-1',
       name: 'Rose',
-      sku: null,
+      sku: 'SKUROSE',
       type: ProductType.FLOWER,
       description: null,
       unit: 'PIECE',

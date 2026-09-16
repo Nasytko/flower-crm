@@ -21,7 +21,7 @@ import { WarehouseLockService } from '../src/modules/warehouse/warehouse-lock.se
 import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 import { AppError } from '../src/common/errors/app-error';
 
 describe('Phase 9 business e2e (live DB)', () => {
@@ -66,6 +66,7 @@ describe('Phase 9 business e2e (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let directorId = '';
+  let supplierId = '';
   let ready = false;
   const productIds: string[] = [];
   const supplyIds: string[] = [];
@@ -99,6 +100,8 @@ describe('Phase 9 business e2e (live DB)', () => {
       },
     });
     directorId = d.id;
+    const supplier = await createTestSupplier(prisma, `Business E2E ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   }, 120_000);
 
@@ -189,6 +192,9 @@ describe('Phase 9 business e2e (live DB)', () => {
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
       }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
+      }
 
       if (productIds.length) {
         await prisma.stockMovement.deleteMany({ where: { productId: { in: productIds } } });
@@ -230,6 +236,7 @@ describe('Phase 9 business e2e (live DB)', () => {
       director(),
       {
         documentDate,
+        supplierId,
         items: [{ productId, quantity, unitPurchasePrice }],
       },
       {},
@@ -410,6 +417,7 @@ describe('Phase 9 business e2e (live DB)', () => {
       director(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId: p, quantity: 1, unitPurchasePrice: '4.00' }],
       },
       {},

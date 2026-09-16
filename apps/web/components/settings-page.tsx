@@ -67,8 +67,8 @@ export function SettingsPage(): ReactElement {
           <StatusRow label="URL веб-приложения" value={data.webUrl} />
           <StatusRow label="API prefix" value={data.apiPrefix} />
           <p className="pt-2 text-xs text-muted-foreground">
-            Изменяемые бизнес-параметры (цены, скидки, роли) живут в соответствующих разделах.
-            Здесь только диагностика и системный контекст.
+            Изменяемые бизнес-параметры (цены, скидки, роли) живут в соответствующих разделах. Здесь
+            только диагностика и системный контекст.
           </p>
         </section>
       )}

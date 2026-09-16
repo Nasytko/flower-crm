@@ -125,7 +125,12 @@ export function SuppliersPage(): ReactElement {
                       <td className="px-3 py-3">{row.isActive ? 'Активен' : 'Неактивен'}</td>
                       <td className="px-5 py-3 text-right">
                         {canManage ? (
-                          <Button type="button" variant="soft" size="sm" onClick={() => setEditing(row)}>
+                          <Button
+                            type="button"
+                            variant="soft"
+                            size="sm"
+                            onClick={() => setEditing(row)}
+                          >
                             Изменить
                           </Button>
                         ) : null}
@@ -279,7 +284,12 @@ function SupplierFormDialog({
         {localError ? <p className="text-sm text-danger-fg">{localError}</p> : null}
         <div className="space-y-2">
           <Label htmlFor="supplier-name">Название *</Label>
-          <Input id="supplier-name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Input
+            id="supplier-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="supplier-phone">Телефон</Label>

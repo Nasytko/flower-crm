@@ -122,12 +122,7 @@ export function SuppliesPage(): ReactElement {
                             cancelled={row.status === SupplyStatus.CANCELLED}
                           />
                         </td>
-                        <td
-                          className={cn(
-                            'px-3 py-3',
-                            overdue && 'font-semibold text-danger-fg',
-                          )}
-                        >
+                        <td className={cn('px-3 py-3', overdue && 'font-semibold text-danger-fg')}>
                           {row.paymentDueDate ?? '—'}
                           {overdue ? (
                             <div className="text-[11px] font-medium">просрочено</div>
@@ -245,13 +240,7 @@ function StatusBadge({ status }: { status: SupplyStatus }): ReactElement {
   );
 }
 
-function PaidBadge({
-  isPaid,
-  cancelled,
-}: {
-  isPaid: boolean;
-  cancelled: boolean;
-}): ReactElement {
+function PaidBadge({ isPaid, cancelled }: { isPaid: boolean; cancelled: boolean }): ReactElement {
   if (cancelled) {
     return (
       <span className="inline-flex shrink-0 rounded-full bg-muted px-3 py-1 text-xs font-semibold text-muted-foreground">

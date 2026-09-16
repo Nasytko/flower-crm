@@ -109,13 +109,8 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     errors.push('JWT_ACCESS_SECRET is required');
   } else if (jwtAccessSecret.length < 32) {
     errors.push('JWT_ACCESS_SECRET must be at least 32 characters');
-  } else if (
-    nodeEnvRaw === 'production' &&
-    FORBIDDEN_PRODUCTION_JWT_SECRETS.has(jwtAccessSecret)
-  ) {
-    errors.push(
-      'JWT_ACCESS_SECRET must not use a known development/example value in production',
-    );
+  } else if (nodeEnvRaw === 'production' && FORBIDDEN_PRODUCTION_JWT_SECRETS.has(jwtAccessSecret)) {
+    errors.push('JWT_ACCESS_SECRET must not use a known development/example value in production');
   }
 
   const jwtAccessTtlSeconds = readInteger(config, 'JWT_ACCESS_TTL_SECONDS', 900, errors, 60);

@@ -17,7 +17,7 @@ import { WarehouseLockService } from '../src/modules/warehouse/warehouse-lock.se
 import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 import { AppError } from '../src/common/errors/app-error';
 
 describe('Phase 8 reservations (live DB)', () => {
@@ -54,6 +54,7 @@ describe('Phase 8 reservations (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let directorId = '';
+  let supplierId = '';
   let ready = false;
   const productIds: string[] = [];
   const supplyIds: string[] = [];
@@ -85,6 +86,8 @@ describe('Phase 8 reservations (live DB)', () => {
       },
     });
     directorId = d.id;
+    const supplier = await createTestSupplier(prisma, `Reservations Live ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   }, 120_000);
 
@@ -168,6 +171,9 @@ describe('Phase 8 reservations (live DB)', () => {
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
       }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
+      }
 
       if (productIds.length) {
         await prisma.productStock.deleteMany({ where: { productId: { in: productIds } } });
@@ -211,6 +217,7 @@ describe('Phase 8 reservations (live DB)', () => {
       director(),
       {
         documentDate,
+        supplierId,
         items: [{ productId, quantity, unitPurchasePrice }],
       },
       {},

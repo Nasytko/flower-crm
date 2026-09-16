@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactElement,
-} from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
 import {
   ApiAddressProvider,
   type AddressSuggestion,
@@ -50,19 +43,22 @@ export function AddressSuggestInput({
   const [highlight, setHighlight] = useState(-1);
   const requestSeq = useRef(0);
 
+  const query = value.addressText.trim();
+  const queryActive = !disabled && query.length >= 2;
+  const visibleSuggestions = queryActive ? suggestions : [];
+  const visibleLoading = queryActive && loading;
+
   useEffect(() => {
-    const q = value.addressText.trim();
-    if (disabled || q.length < 2) {
-      setSuggestions([]);
-      setLoading(false);
+    if (!queryActive) {
       return;
     }
 
     const seq = ++requestSeq.current;
-    setLoading(true);
     const timer = window.setTimeout(() => {
+      setLoading(true);
+      setSuggestions([]);
       void provider
-        .suggest({ query: q, limit: 6 })
+        .suggest({ query, limit: 6 })
         .then((items) => {
           if (seq !== requestSeq.current) return;
           setSuggestions(items);
@@ -79,7 +75,7 @@ export function AddressSuggestInput({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [value.addressText, disabled]);
+  }, [query, queryActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -105,16 +101,16 @@ export function AddressSuggestInput({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (!open || suggestions.length === 0) return;
+    if (!open || visibleSuggestions.length === 0) return;
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setHighlight((prev) => (prev + 1) % suggestions.length);
+      setHighlight((prev) => (prev + 1) % visibleSuggestions.length);
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setHighlight((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
-    } else if (event.key === 'Enter' && highlight >= 0 && suggestions[highlight]) {
+      setHighlight((prev) => (prev <= 0 ? visibleSuggestions.length - 1 : prev - 1));
+    } else if (event.key === 'Enter' && highlight >= 0 && visibleSuggestions[highlight]) {
       event.preventDefault();
-      selectSuggestion(suggestions[highlight]!);
+      selectSuggestion(visibleSuggestions[highlight]!);
     } else if (event.key === 'Escape') {
       setOpen(false);
     }
@@ -146,16 +142,16 @@ export function AddressSuggestInput({
         }}
         onKeyDown={onKeyDown}
       />
-      {open && !disabled && (loading || suggestions.length > 0) ? (
+      {open && !disabled && (visibleLoading || visibleSuggestions.length > 0) ? (
         <ul
           id={listId}
           role="listbox"
           className="absolute z-40 mt-1 max-h-60 w-full overflow-auto rounded-2xl border border-border bg-card py-1 shadow-lg"
         >
-          {loading && suggestions.length === 0 ? (
+          {visibleLoading && visibleSuggestions.length === 0 ? (
             <li className="px-4 py-2.5 text-sm text-muted-foreground">Поиск…</li>
           ) : null}
-          {suggestions.map((item, index) => (
+          {visibleSuggestions.map((item, index) => (
             <li key={`${item.provider}-${item.providerPlaceId ?? item.label}-${index}`}>
               <button
                 type="button"

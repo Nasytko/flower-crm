@@ -8,7 +8,7 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
 import { AppError } from '../src/common/errors/app-error';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 describe('Phase 4 supplies + FIFO (live DB)', () => {
   const databaseUrl = process.env.DATABASE_URL;
@@ -32,6 +32,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let actorId = '';
+  let supplierId = '';
   let ready = false;
   const productIds: string[] = [];
   const supplyIds: string[] = [];
@@ -62,6 +63,8 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       },
     });
     actorId = user.id;
+    const supplier = await createTestSupplier(prisma, `Supply Test ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   }, 60_000);
 
@@ -103,6 +106,9 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
         });
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
+      }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
       }
       if (productIds.length > 0) {
         await prisma.stockMovementLotAllocation.deleteMany({
@@ -155,6 +161,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: 20, unitPurchasePrice: '5.00' }],
       },
       {},
@@ -196,6 +203,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [
           { productId: a, quantity: 50, unitPurchasePrice: '1.00' },
           { productId: b, quantity: 20, unitPurchasePrice: '2.00' },
@@ -231,6 +239,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: 50, unitPurchasePrice: '5.20' }],
       },
       {},
@@ -286,6 +295,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: 50, unitPurchasePrice: '4.00' }],
       },
       {},
@@ -312,6 +322,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-01',
+        supplierId,
         items: [{ productId, quantity: 10, unitPurchasePrice: '4.00' }],
       },
       {},
@@ -326,6 +337,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-02',
+        supplierId,
         items: [{ productId, quantity: 20, unitPurchasePrice: '5.00' }],
       },
       {},
@@ -362,6 +374,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: 5, unitPurchasePrice: '4.00' }],
       },
       {},
@@ -372,6 +385,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: 15, unitPurchasePrice: '5.00' }],
       },
       {},
@@ -404,6 +418,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
         actor(),
         {
           documentDate: '2026-09-14',
+          supplierId,
           items: [{ productId: service.id, quantity: 1, unitPurchasePrice: '1.00' }],
         },
         {},
@@ -415,6 +430,7 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId: flowerId, quantity: 3, unitPurchasePrice: '2.00' }],
       },
       {},

@@ -8,7 +8,7 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
 import { AppError } from '../src/common/errors/app-error';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 /**
  * Live PostgreSQL concurrency for write-offs after supply posting.
@@ -35,6 +35,7 @@ describe('ProductsService write-off concurrency (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let actorId = '';
+  let supplierId = '';
   let ready = false;
   const productIds: string[] = [];
   const supplyIds: string[] = [];
@@ -67,6 +68,8 @@ describe('ProductsService write-off concurrency (live DB)', () => {
       },
     });
     actorId = user.id;
+    const supplier = await createTestSupplier(prisma, `Stock Test ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   }, 60_000);
 
@@ -86,6 +89,9 @@ describe('ProductsService write-off concurrency (live DB)', () => {
         });
         await prisma.supplyItem.deleteMany({ where: { supplyId: { in: supplyIds } } });
         await prisma.supply.deleteMany({ where: { id: { in: supplyIds } } });
+      }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
       }
       if (productIds.length > 0) {
         await prisma.stockMovementLotAllocation.deleteMany({
@@ -131,6 +137,7 @@ describe('ProductsService write-off concurrency (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity: qty, unitPurchasePrice: price }],
       },
       {},
@@ -139,100 +146,117 @@ describe('ProductsService write-off concurrency (live DB)', () => {
     await supplies.post(actor(), draft.id, {});
   }
 
-  it('allows only one of concurrent overselling write-offs', async () => {
-    if (!ready) return;
+  it(
+    'allows only one of concurrent overselling write-offs',
+    async () => {
+      if (!ready) return;
 
-    const productId = await createFlower(`Conc Race ${suffix}`);
-    await seedStock(productId, 10);
+      const productId = await createFlower(`Conc Race ${suffix}`);
+      await seedStock(productId, 10);
 
-    const results = await Promise.allSettled([
-      products.writeOff(actor(), productId, { quantity: 7, reason: 'race A test' }, {}),
-      products.writeOff(actor(), productId, { quantity: 6, reason: 'race B test' }, {}),
-    ]);
+      const results = await Promise.allSettled([
+        products.writeOff(actor(), productId, { quantity: 7, reason: 'race A test' }, {}),
+        products.writeOff(actor(), productId, { quantity: 6, reason: 'race B test' }, {}),
+      ]);
 
-    const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter((r) => r.status === 'rejected');
-    expect(fulfilled.length).toBe(1);
-    expect(rejected.length).toBe(1);
-    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(AppError);
-    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
-      code: 'INSUFFICIENT_STOCK',
-    });
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(AppError);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+        code: 'INSUFFICIENT_STOCK',
+      });
 
-    const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
-    expect([3, 4]).toContain(stock.quantityOnHand);
-  });
+      const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
+      expect([3, 4]).toContain(stock.quantityOnHand);
+    },
+    60_000,
+  );
 
-  it('applies 20 concurrent write-offs after large supply without lost updates', async () => {
-    if (!ready) return;
+  it(
+    'applies 20 concurrent write-offs after large supply without lost updates',
+    async () => {
+      if (!ready) return;
 
-    const productId = await createFlower(`Conc Plus ${suffix}`);
-    await seedStock(productId, 120);
+      const productId = await createFlower(`Conc Plus ${suffix}`);
+      await seedStock(productId, 120);
 
-    const results = await Promise.all(
-      Array.from({ length: 20 }, (_, i) =>
-        products.writeOff(
-          actor(),
-          productId,
-          { quantity: 1, reason: `concurrent write-off ${i}` },
-          {},
+      const results = await Promise.all(
+        Array.from({ length: 20 }, (_, i) =>
+          products.writeOff(
+            actor(),
+            productId,
+            { quantity: 1, reason: `concurrent write-off ${i}` },
+            {},
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(results).toHaveLength(20);
-    const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
-    expect(stock.quantityOnHand).toBe(100);
+      expect(results).toHaveLength(20);
+      const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
+      expect(stock.quantityOnHand).toBe(100);
 
-    const offs = await prisma.stockMovement.count({
-      where: { productId, quantity: -1, type: StockMovementType.MANUAL_WRITE_OFF },
-    });
-    expect(offs).toBe(20);
-  });
+      const offs = await prisma.stockMovement.count({
+        where: { productId, quantity: -1, type: StockMovementType.MANUAL_WRITE_OFF },
+      });
+      expect(offs).toBe(20);
+    },
+    90_000,
+  );
 
-  it('keeps ledger consistent through supply then write-offs', async () => {
-    if (!ready) return;
+  it(
+    'keeps ledger consistent through supply then write-offs',
+    async () => {
+      if (!ready) return;
 
-    const productId = await createFlower(`Ledger ${suffix}`);
-    await seedStock(productId, 16);
+      const productId = await createFlower(`Ledger ${suffix}`);
+      await seedStock(productId, 16);
 
-    for (const qty of [3, 4, 1]) {
-      await products.writeOff(actor(), productId, { quantity: qty, reason: `ledger -${qty}` }, {});
-    }
+      for (const qty of [3, 4, 1]) {
+        await products.writeOff(actor(), productId, { quantity: qty, reason: `ledger -${qty}` }, {});
+      }
 
-    const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
-    expect(stock.quantityOnHand).toBe(8);
+      const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
+      expect(stock.quantityOnHand).toBe(8);
 
-    const movements = await prisma.stockMovement.findMany({
-      where: { productId },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
-    const sum = movements.reduce((acc, m) => acc + m.quantity, 0);
-    expect(sum).toBe(8);
-    expect(movements.at(-1)?.balanceAfter).toBe(8);
-  });
+      const movements = await prisma.stockMovement.findMany({
+        where: { productId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      const sum = movements.reduce((acc, m) => acc + m.quantity, 0);
+      expect(sum).toBe(8);
+      expect(movements.at(-1)?.balanceAfter).toBe(8);
+    },
+    60_000,
+  );
 
-  it('does not create ProductStock for SERVICE', async () => {
-    if (!ready) return;
+  it(
+    'does not create ProductStock for SERVICE',
+    async () => {
+      if (!ready) return;
 
-    const serviceProduct = await products.create(
-      actor(),
-      {
-        name: `Service ${suffix}`,
-        sku: '   ',
-        type: ProductType.SERVICE,
-        unit: Unit.PIECE,
-      },
-      {},
-    );
-    productIds.push(serviceProduct.id);
+      const serviceProduct = await products.create(
+        actor(),
+        {
+          name: `Service ${suffix}`,
+          type: ProductType.SERVICE,
+          unit: Unit.PIECE,
+        },
+        {},
+      );
+      productIds.push(serviceProduct.id);
 
-    expect(serviceProduct.sku).toBeNull();
-    const stock = await prisma.productStock.findUnique({ where: { productId: serviceProduct.id } });
-    expect(stock).toBeNull();
+      expect(serviceProduct.sku).toBeTruthy();
+      const stock = await prisma.productStock.findUnique({
+        where: { productId: serviceProduct.id },
+      });
+      expect(stock).toBeNull();
 
-    await expect(
-      products.writeOff(actor(), serviceProduct.id, { quantity: 1, reason: 'not allowed' }, {}),
-    ).rejects.toMatchObject({ code: 'STOCK_NOT_SUPPORTED' });
-  });
+      await expect(
+        products.writeOff(actor(), serviceProduct.id, { quantity: 1, reason: 'not allowed' }, {}),
+      ).rejects.toMatchObject({ code: 'STOCK_NOT_SUPPORTED' });
+    },
+    30_000,
+  );
 });

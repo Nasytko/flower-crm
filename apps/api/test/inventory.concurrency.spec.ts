@@ -16,7 +16,7 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
 import { AppError } from '../src/common/errors/app-error';
-import { cancelLeftoverInventories } from './helpers/live-db';
+import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 describe('Phase 5 inventory (live DB)', () => {
   jest.setTimeout(90_000);
@@ -48,6 +48,7 @@ describe('Phase 5 inventory (live DB)', () => {
   const suffix = Date.now().toString(36);
 
   let actorId = '';
+  let supplierId = '';
   let ready = false;
   const productIds: string[] = [];
   const supplyIds: string[] = [];
@@ -80,6 +81,8 @@ describe('Phase 5 inventory (live DB)', () => {
       },
     });
     actorId = user.id;
+    const supplier = await createTestSupplier(prisma, `Inventory Test ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   }, 60_000);
 
@@ -216,6 +219,9 @@ describe('Phase 5 inventory (live DB)', () => {
         await prisma.auditLog.deleteMany({ where: { actorUserId: actorId } });
         await prisma.user.delete({ where: { id: actorId } });
       }
+      if (supplierId) {
+        await deleteTestSuppliers(prisma, [supplierId]);
+      }
     } finally {
       await prisma.$disconnect();
     }
@@ -241,6 +247,7 @@ describe('Phase 5 inventory (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId, quantity, unitPurchasePrice: price }],
       },
       {},
@@ -322,6 +329,7 @@ describe('Phase 5 inventory (live DB)', () => {
             actor(),
             {
               documentDate: '2026-09-14',
+              supplierId,
               items: [{ productId: a, quantity: 1, unitPurchasePrice: '1.00' }],
             },
             {},
@@ -340,6 +348,7 @@ describe('Phase 5 inventory (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId: a, quantity: 1, unitPurchasePrice: '1.00' }],
       },
       {},
@@ -497,6 +506,7 @@ describe('Phase 5 inventory (live DB)', () => {
       actor(),
       {
         documentDate: '2026-09-14',
+        supplierId,
         items: [{ productId: p, quantity: 5, unitPurchasePrice: '2.00' }],
       },
       {},
