@@ -133,6 +133,13 @@ BOOTSTRAP_DIRECTOR_PASSWORD='your-strong-password-min-10' \
 
 ## 4. Host Nginx
 
+Repo file `deploy/nginx/erp.nasytko.ru.conf` is a **reference/template**
+(gzip, `/_next/static/` immutable cache, upstream keepalive). Production may
+already have Certbot TLS/HSTS blocks — **do not blindly overwrite** the live
+vhost.
+
+### First install (HTTP only, before Certbot)
+
 ```bash
 sudo cp /opt/apps/newerp/deploy/nginx/erp.nasytko.ru.conf \
   /etc/nginx/sites-available/erp.nasytko.ru.conf
@@ -147,10 +154,30 @@ Ensure DNS points to this VPS, then:
 sudo certbot --nginx -d erp.nasytko.ru
 ```
 
+### Later updates (after Certbot) — merge, do not overwrite
+
+```bash
+# 1) Backup live config
+sudo cp /etc/nginx/sites-available/erp.nasytko.ru.conf \
+  /etc/nginx/sites-available/erp.nasytko.ru.conf.bak.$(date +%Y%m%d%H%M%S)
+
+# 2) Compare live vs repo template
+sudo cat /etc/nginx/sites-available/erp.nasytko.ru.conf
+diff -u /etc/nginx/sites-available/erp.nasytko.ru.conf \
+  /opt/apps/newerp/deploy/nginx/erp.nasytko.ru.conf || true
+
+# 3) Manually merge: gzip, upstream keepalive, /_next/static/ Cache-Control
+#    Keep Certbot listen 443 / ssl_certificate / redirect blocks intact.
+
+# 4) Test + reload (never restart casually)
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 Verify:
 
 ```bash
 curl -fsS https://erp.nasytko.ru/api/v1/health
+curl -sI https://erp.nasytko.ru/login | head
 # Open https://erp.nasytko.ru/login and sign in
 ```
 
