@@ -134,20 +134,32 @@ export function SearchableSelect({
     const trigger = rootRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const width = Math.max(rect.width, 280);
-    const maxHeight = 320;
-    const spaceBelow = window.innerHeight - rect.bottom - 12;
-    const openUp = spaceBelow < 220 && rect.top > spaceBelow;
+    const viewportPad = 8;
+    const availableWidth = Math.max(160, window.innerWidth - viewportPad * 2);
+    // Prefer trigger width; never force 280px on narrow phones.
+    const preferred = Math.max(rect.width, Math.min(280, availableWidth));
+    const width = Math.min(preferred, availableWidth);
+    const maxHeight = Math.min(360, Math.max(200, window.innerHeight * 0.55));
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPad;
+    const spaceAbove = rect.top - viewportPad;
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const heightBudget = openUp ? spaceAbove - 8 : spaceBelow - 8;
+    const panelHeight = Math.min(maxHeight, Math.max(160, heightBudget));
     const top = openUp
-      ? Math.max(8, rect.top - Math.min(maxHeight, rect.top - 8) - 8)
+      ? Math.max(viewportPad, rect.top - panelHeight - 8)
       : rect.bottom + 8;
-    const left = Math.min(rect.left, window.innerWidth - width - 8);
+    // Keep panel aligned to trigger when possible; clamp to viewport.
+    let left = rect.left;
+    if (left + width > window.innerWidth - viewportPad) {
+      left = window.innerWidth - viewportPad - width;
+    }
+    left = Math.max(viewportPad, left);
     setPanelStyle({
       position: 'fixed',
       top,
-      left: Math.max(8, left),
+      left,
       width,
-      maxHeight,
+      maxHeight: panelHeight,
       zIndex: 80,
     });
   }, []);
@@ -238,11 +250,11 @@ export function SearchableSelect({
             tabIndex={-1}
             style={panelStyle}
             onKeyDown={onListKeyDown}
-            className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_18px_50px_rgba(15,23,42,0.14)]"
+            className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_18px_50px_rgba(15,23,42,0.18)]"
           >
             {searchable ? (
-              <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-                <Search className="size-4 text-muted-foreground" aria-hidden />
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
+                <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <input
                   ref={searchRef}
                   value={query}
@@ -251,16 +263,16 @@ export function SearchableSelect({
                     setHighlight(0);
                   }}
                   placeholder={searchPlaceholder}
-                  className="h-8 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  className="h-10 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground sm:h-9 sm:text-sm"
                 />
               </div>
             ) : null}
 
-            <div className="max-h-72 overflow-y-auto p-1.5">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
               {clearable && value ? (
                 <button
                   type="button"
-                  className="mb-1 flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted"
+                  className="mb-1 flex min-h-11 w-full items-center rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground active:bg-muted hover:bg-muted"
                   onClick={() => {
                     onChange('');
                     close();
@@ -297,12 +309,12 @@ export function SearchableSelect({
                           }}
                           onClick={() => pick(option)}
                           className={cn(
-                            'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors',
+                            'flex min-h-11 w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors',
                             option.disabled
                               ? 'cursor-not-allowed opacity-45'
                               : isHighlighted
                                 ? 'bg-primary-soft'
-                                : 'hover:bg-muted/70',
+                                : 'active:bg-muted/80 hover:bg-muted/70',
                             isSelected && !option.disabled && 'bg-muted',
                           )}
                         >
@@ -311,7 +323,9 @@ export function SearchableSelect({
                           </span>
                           <span className="min-w-0 flex-1 space-y-1">
                             <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                              <span className="truncate text-sm font-medium">{option.label}</span>
+                              <span className="truncate text-[15px] font-medium sm:text-sm">
+                                {option.label}
+                              </span>
                               {option.badges?.map((badge) => (
                                 <OptionBadge key={`${option.value}-${badge.text}`} {...badge} />
                               ))}
@@ -346,8 +360,8 @@ export function SearchableSelect({
         onClick={() => (open ? close() : openPanel())}
         onKeyDown={onTriggerKeyDown}
         className={cn(
-          'flex h-10 w-full items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-sm transition-colors',
-          'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'flex h-11 w-full items-center gap-2 rounded-2xl border border-border bg-card px-3.5 text-left text-sm transition-colors',
+          'active:bg-muted/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           'disabled:cursor-not-allowed disabled:opacity-45',
           open && 'ring-2 ring-ring',
           triggerClassName,
@@ -396,7 +410,7 @@ export function FilterSelect({
       searchable={false}
       ariaLabel={ariaLabel}
       className={className}
-      triggerClassName="h-11 rounded-full px-4"
+      triggerClassName="h-11 min-h-11 rounded-full px-4"
       placeholder="Выберите…"
     />
   );

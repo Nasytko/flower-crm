@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Reference-inspired: graphite sidebar + acid lime accent (not Stebly brand). */
+  /* Graphite sidebar + acid lime accent */
   --background: #f4f5f7;
   --foreground: #141414;
   --card: #ffffff;
@@ -77,4 +77,13 @@ body {
 html,
 body {
   overflow-x: clip;
+}
+
+/* Comfortable tap targets + iOS zoom avoidance on form controls */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

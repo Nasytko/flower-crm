@@ -67,7 +67,10 @@ export function ConfirmDialog({
         aria-describedby={description ? descId : undefined}
         className="relative z-10 w-full max-w-md overflow-hidden rounded-t-[28px] border border-border bg-card shadow-xl sm:rounded-[28px]"
       >
-        <div className="space-y-2 px-5 py-5">
+        <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
+          <span className="h-1 w-10 rounded-full bg-border" />
+        </div>
+        <div className="space-y-2 px-5 pb-5 pt-2 sm:pt-5">
           <h2 id={titleId} className="text-lg font-semibold tracking-tight">
             {title}
           </h2>

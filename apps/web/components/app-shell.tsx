@@ -101,10 +101,10 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
           href={item.href}
           onClick={() => setDrawerOpen(false)}
           className={cn(
-            'flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors',
+            'flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-[15px] transition-colors active:scale-[0.99] sm:text-sm',
             navActive(pathname, item.href)
               ? 'bg-sidebar-active font-semibold text-sidebar-active-foreground'
-              : 'text-sidebar-foreground/85 hover:bg-white/5 hover:text-white focus-visible:bg-white/5 focus-visible:text-white',
+              : 'text-sidebar-foreground/85 hover:bg-white/5 hover:text-white focus-visible:bg-white/5 focus-visible:text-white active:bg-white/8',
           )}
         >
           <span className="w-5 text-center text-base opacity-80" aria-hidden>
@@ -164,7 +164,7 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
         <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-black/40"
+            className="absolute inset-0 bg-black/45 backdrop-blur-[1px] transition-opacity"
             aria-label="Закрыть меню"
             onClick={() => setDrawerOpen(false)}
           />
@@ -172,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
             role="dialog"
             aria-modal="true"
             aria-labelledby={drawerTitleId}
-            className="absolute inset-y-0 left-0 flex w-[min(100%,288px)] flex-col bg-sidebar text-sidebar-foreground shadow-xl"
+            className="absolute inset-y-0 left-0 flex w-[min(100%,300px)] flex-col bg-sidebar text-sidebar-foreground shadow-2xl animate-in slide-in-from-left duration-200"
           >
             <div className="flex items-center justify-between gap-2 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
               <div className="flex items-center gap-2.5">
@@ -204,7 +204,7 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex min-h-14 items-center gap-3 border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden pt-[max(0.5rem,env(safe-area-inset-top))]">
+        <header className="sticky top-0 z-30 flex min-h-14 items-center gap-3 border-b border-border bg-background/95 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden pt-[max(0.5rem,env(safe-area-inset-top))]">
           <Button
             type="button"
             variant="outline"
@@ -217,12 +217,12 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
             <Menu className="size-5" />
           </Button>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold tracking-tight">{title}</p>
+            <p className="truncate text-[15px] font-semibold tracking-tight">{title}</p>
             <p className="truncate text-xs text-muted-foreground">{ROLE_LABELS_RU[user.role]}</p>
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-5 sm:py-6 md:px-6 md:py-7 lg:px-8">
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-3.5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-5 sm:py-6 md:px-6 md:py-7 lg:px-8">
           {children}
         </main>
       </div>

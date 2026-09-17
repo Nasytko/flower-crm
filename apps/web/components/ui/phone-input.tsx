@@ -65,7 +65,7 @@ export function PhoneInput({
   return (
     <div
       className={cn(
-        'flex h-11 w-full items-stretch overflow-hidden rounded-full border border-border bg-card focus-within:ring-2 focus-within:ring-ring/40',
+        'flex h-11 w-full items-stretch overflow-hidden rounded-2xl border border-border bg-card focus-within:ring-2 focus-within:ring-ring/40 sm:rounded-full',
         disabled && 'opacity-70',
         className,
       )}
@@ -84,7 +84,7 @@ export function PhoneInput({
             nextId === 'OTHER' ? national : normalizeNationalInput(nextId, national);
           commit(nextId, nextNational);
         }}
-        className="h-full min-w-[6.75rem] max-w-[8.5rem] shrink-0 cursor-pointer appearance-none border-0 border-r border-border bg-muted/50 bg-[length:0.75rem] bg-[right_0.55rem_center] bg-no-repeat py-0 pl-3 pr-7 text-xs font-semibold outline-none disabled:cursor-not-allowed"
+        className="h-full min-w-[7.25rem] max-w-[9.5rem] shrink-0 cursor-pointer appearance-none border-0 border-r border-border bg-muted/50 bg-[length:0.75rem] bg-[right_0.55rem_center] bg-no-repeat py-0 pl-3 pr-7 text-sm font-semibold outline-none disabled:cursor-not-allowed sm:min-w-[6.75rem] sm:max-w-[8.5rem] sm:text-xs"
         style={{
           backgroundImage:
             "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E\")",
@@ -127,7 +127,7 @@ export function PhoneInput({
           }
           commit(countryId, normalizeNationalInput(countryId, e.target.value));
         }}
-        className="min-w-0 flex-1 border-0 bg-transparent px-3 text-sm tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+        className="min-w-0 flex-1 border-0 bg-transparent px-3 text-base tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:text-sm"
       />
     </div>
   );

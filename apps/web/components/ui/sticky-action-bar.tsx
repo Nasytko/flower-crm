@@ -21,7 +21,7 @@ export function StickyActionBar({
         className,
       )}
     >
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-2 px-3 sm:flex-row sm:flex-wrap sm:justify-end sm:px-5 md:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-2.5 px-3.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2 sm:px-5 md:px-6 lg:px-8">
         {children}
       </div>
     </div>

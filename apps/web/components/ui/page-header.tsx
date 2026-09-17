@@ -63,7 +63,7 @@ export function ToolbarRow({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-2.5 sm:px-4',
+        'flex flex-wrap items-center gap-2 px-3 py-3 sm:gap-2.5 sm:px-4 sm:py-2.5',
         divided && 'border-t border-border/80',
         className,
       )}
@@ -115,7 +115,7 @@ export function ToolbarSearch({
         }}
         placeholder={placeholder}
         aria-label={ariaLabel}
-        className="h-10 rounded-2xl border-border/80 bg-background pl-10"
+        className="h-11 rounded-2xl border-border/80 bg-background pl-10 text-base sm:h-10 sm:text-sm"
       />
     </div>
   );
@@ -142,10 +142,10 @@ export function ToolbarChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'inline-flex h-9 shrink-0 items-center rounded-full px-3.5 text-sm font-medium transition-colors disabled:opacity-50',
+        'inline-flex h-10 min-h-10 shrink-0 items-center rounded-full px-3.5 text-sm font-medium transition-colors active:scale-[0.98] disabled:opacity-50 sm:h-9 sm:min-h-9',
         active
           ? 'bg-primary text-primary-foreground'
-          : 'bg-muted text-foreground hover:bg-muted/80',
+          : 'bg-muted text-foreground hover:bg-muted/80 active:bg-muted/70',
         className,
       )}
     >

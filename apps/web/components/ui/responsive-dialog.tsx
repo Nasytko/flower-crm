@@ -76,7 +76,7 @@ export function ResponsiveDialog({
       <button
         type="button"
         aria-label="Закрыть"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
         onClick={onClose}
       />
       <div
@@ -96,7 +96,11 @@ export function ResponsiveDialog({
           size === 'sheet' && 'sm:max-w-lg',
         )}
       >
-        <header className="shrink-0 border-b border-border px-5 py-4">
+        {/* Mobile grab handle */}
+        <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
+          <span className="h-1 w-10 rounded-full bg-border" />
+        </div>
+        <header className="shrink-0 border-b border-border px-5 pb-4 pt-2 sm:pt-4">
           <h2 id={titleId} className="text-lg font-semibold tracking-tight">
             {title}
           </h2>
@@ -106,7 +110,7 @@ export function ResponsiveDialog({
             </p>
           ) : null}
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
         {footer ? (
           <footer className="shrink-0 border-t border-border px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {footer}

@@ -60,7 +60,7 @@ export function TimeSelect({
       value={normalized}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
-        'flex h-11 w-full appearance-none rounded-2xl border border-border bg-card bg-[length:1rem] bg-[right_0.85rem_center] bg-no-repeat px-4 pr-10 text-sm tabular-nums outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-70',
+        'flex h-11 w-full appearance-none rounded-2xl border border-border bg-card bg-[length:1rem] bg-[right_0.85rem_center] bg-no-repeat px-4 pr-10 text-base tabular-nums outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-70 sm:text-sm',
         'bg-[url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 fill=%27none%27 stroke=%27%236b7280%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27m4 6 4 4 4-4%27/%3E%3C/svg%3E")]',
         !normalized && 'text-muted-foreground',
         className,

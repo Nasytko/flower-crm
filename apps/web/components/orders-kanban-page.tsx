@@ -641,7 +641,7 @@ export function OrdersKanbanPage(): ReactElement {
 
           <div className="space-y-3 lg:hidden">
             <div
-              className="grid grid-cols-3 gap-1 rounded-2xl bg-muted p-1"
+              className="grid grid-cols-3 gap-1.5 rounded-2xl bg-muted p-1.5"
               role="tablist"
               aria-label="Статус заказов"
             >
@@ -655,13 +655,15 @@ export function OrdersKanbanPage(): ReactElement {
                     role="tab"
                     aria-selected={selected}
                     className={cn(
-                      'min-h-11 rounded-xl px-2 text-center text-xs font-semibold transition-colors sm:text-sm',
-                      selected ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground',
+                      'min-h-12 rounded-xl px-1.5 py-1.5 text-center text-[13px] font-semibold leading-tight transition-colors active:scale-[0.98] sm:px-2 sm:text-sm',
+                      selected
+                        ? 'bg-card text-foreground shadow-sm'
+                        : 'text-muted-foreground active:bg-card/50',
                     )}
                     onClick={() => setParams({ col: status === OrderStatus.NEW ? null : status })}
                   >
                     <span className="block truncate">{columnTitle(status, fulfillmentFilter)}</span>
-                    <span className="tabular-nums opacity-80">{count}</span>
+                    <span className="mt-0.5 block text-xs tabular-nums opacity-80">{count}</span>
                   </button>
                 );
               })}

@@ -146,10 +146,10 @@ export function AddressSuggestInput({
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-40 mt-1 max-h-60 w-full overflow-auto rounded-2xl border border-border bg-card py-1 shadow-lg"
+          className="absolute z-40 mt-1.5 max-h-[min(16rem,45dvh)] w-full overflow-auto overscroll-contain rounded-2xl border border-border bg-card py-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.14)]"
         >
           {visibleLoading && visibleSuggestions.length === 0 ? (
-            <li className="px-4 py-2.5 text-sm text-muted-foreground">Поиск…</li>
+            <li className="px-4 py-3 text-sm text-muted-foreground">Поиск…</li>
           ) : null}
           {visibleSuggestions.map((item, index) => (
             <li key={`${item.provider}-${item.providerPlaceId ?? item.label}-${index}`}>
@@ -158,8 +158,8 @@ export function AddressSuggestInput({
                 role="option"
                 aria-selected={index === highlight}
                 className={cn(
-                  'flex w-full px-4 py-2.5 text-left text-sm transition-colors',
-                  index === highlight ? 'bg-muted' : 'hover:bg-muted/60',
+                  'flex min-h-11 w-full px-4 py-2.5 text-left text-[15px] transition-colors sm:text-sm',
+                  index === highlight ? 'bg-primary-soft' : 'active:bg-muted hover:bg-muted/60',
                 )}
                 onMouseEnter={() => setHighlight(index)}
                 onClick={() => selectSuggestion(item)}
