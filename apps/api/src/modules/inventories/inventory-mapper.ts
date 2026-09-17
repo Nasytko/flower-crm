@@ -10,17 +10,39 @@ export function formatInventoryNumber(number: number): string {
   return `INV-${String(number).padStart(6, '0')}`;
 }
 
-type SessionRow = {
+export type InventoryItemSummaryRow = {
+  expectedQuantity: number;
+  countedQuantity: number | null;
+};
+
+export type InventoryListSummary = {
+  itemCount: number;
+  countedItemCount: number;
+  differenceItemCount: number;
+  positiveQuantity: number;
+  negativeQuantity: number;
+};
+
+type SessionHeader = {
   id: string;
   number: number;
   status: InventoryStatus | string;
   comment: string | null;
-  createdByUserId: string;
-  completedByUserId: string | null;
+  createdByUserId?: string;
+  completedByUserId?: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
-  cancelledAt: Date | null;
+  cancelledAt?: Date | null;
   createdAt: Date;
+  updatedAt?: Date;
+  createdBy: { id?: string; name: string };
+  completedBy?: { id?: string; name: string } | null;
+};
+
+type SessionRow = SessionHeader & {
+  createdByUserId: string;
+  completedByUserId: string | null;
+  cancelledAt: Date | null;
   updatedAt: Date;
   createdBy: { id: string; name: string };
   completedBy?: { id: string; name: string } | null;
@@ -52,7 +74,8 @@ export function toInventoryItemDto(item: SessionRow['items'][number]): Inventory
   };
 }
 
-export function summarizeItems(items: SessionRow['items']) {
+/** Same semantics as inventory list SQL FILTER aggregates (counts only). */
+export function summarizeItems(items: InventoryItemSummaryRow[]): InventoryListSummary {
   const itemCount = items.length;
   const countedItemCount = items.filter((i) => i.countedQuantity !== null).length;
   let differenceItemCount = 0;
@@ -68,8 +91,13 @@ export function summarizeItems(items: SessionRow['items']) {
   return { itemCount, countedItemCount, differenceItemCount, positiveQuantity, negativeQuantity };
 }
 
-export function toInventoryListItem(row: SessionRow): InventoryListItem {
-  const summary = summarizeItems(row.items);
+export function toInventoryListItem(
+  row: SessionHeader,
+  summary: Pick<
+    InventoryListSummary,
+    'itemCount' | 'countedItemCount' | 'differenceItemCount'
+  >,
+): InventoryListItem {
   return {
     id: row.id,
     number: row.number,
@@ -90,7 +118,7 @@ export function toInventoryListItem(row: SessionRow): InventoryListItem {
 export function toInventoryDetail(row: SessionRow): InventoryDetail {
   const summary = summarizeItems(row.items);
   return {
-    ...toInventoryListItem(row),
+    ...toInventoryListItem(row, summary),
     createdByUserId: row.createdByUserId,
     completedByUserId: row.completedByUserId,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,

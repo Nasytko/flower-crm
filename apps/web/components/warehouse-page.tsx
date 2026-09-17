@@ -22,6 +22,7 @@ import {
 } from '@/lib/api/products';
 import { getActiveInventory } from '@/lib/api/inventories';
 import { queryKeys } from '@/lib/query-keys';
+import { invalidateAfterManualWriteOff } from '@/lib/query-invalidation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -127,7 +128,7 @@ export function WarehousePage(): ReactElement {
       setWriteOffTarget(null);
       setMessage('Списание выполнено');
       setError(null);
-      await invalidateProducts();
+      await invalidateAfterManualWriteOff(queryClient);
       if (historyProduct) {
         await queryClient.invalidateQueries({
           queryKey: queryKeys.stockMovements(historyProduct.id),

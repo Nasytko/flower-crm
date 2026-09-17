@@ -47,6 +47,25 @@ const sessionDetailInclude = {
   },
 } as const;
 
+/** List needs session header + user names only; item aggregates load separately. */
+const sessionListSelect = {
+  id: true,
+  number: true,
+  status: true,
+  comment: true,
+  startedAt: true,
+  completedAt: true,
+  createdAt: true,
+  createdBy: { select: { name: true } },
+  completedBy: { select: { name: true } },
+} as const;
+
+const EMPTY_LIST_SUMMARY = {
+  itemCount: 0,
+  countedItemCount: 0,
+  differenceItemCount: 0,
+} as const;
+
 @Injectable()
 export class InventoriesService {
   constructor(
@@ -64,19 +83,71 @@ export class InventoriesService {
     const [total, rows] = await Promise.all([
       this.prisma.inventorySession.count(),
       this.prisma.inventorySession.findMany({
-        include: sessionDetailInclude,
+        select: sessionListSelect,
         orderBy: [{ createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
     ]);
 
+    const summaries = await this.loadListItemSummaries(rows.map((row) => row.id));
+
     return {
-      items: rows.map((row) => toInventoryListItem(row)),
+      items: rows.map((row) =>
+        toInventoryListItem(row, summaries.get(row.id) ?? EMPTY_LIST_SUMMARY),
+      ),
       total,
       page,
       limit,
     };
+  }
+
+  /**
+   * Aggregate inventory_items without materializing product/counter joins.
+   * FILTER semantics match summarizeItems() counts.
+   */
+  private async loadListItemSummaries(sessionIds: string[]) {
+    const map = new Map<
+      string,
+      {
+        itemCount: number;
+        countedItemCount: number;
+        differenceItemCount: number;
+      }
+    >();
+    if (sessionIds.length === 0) {
+      return map;
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        inventorySessionId: string;
+        itemCount: number;
+        countedItemCount: number;
+        differenceItemCount: number;
+      }>
+    >`
+      SELECT
+        "inventorySessionId",
+        COUNT(*)::int AS "itemCount",
+        COUNT(*) FILTER (WHERE "countedQuantity" IS NOT NULL)::int AS "countedItemCount",
+        COUNT(*) FILTER (
+          WHERE "countedQuantity" IS NOT NULL
+            AND "countedQuantity" <> "expectedQuantity"
+        )::int AS "differenceItemCount"
+      FROM inventory_items
+      WHERE "inventorySessionId" IN (${Prisma.join(sessionIds)})
+      GROUP BY "inventorySessionId"
+    `;
+
+    for (const row of rows) {
+      map.set(row.inventorySessionId, {
+        itemCount: row.itemCount,
+        countedItemCount: row.countedItemCount,
+        differenceItemCount: row.differenceItemCount,
+      });
+    }
+    return map;
   }
 
   async getActive(_actor: AuthenticatedUser): Promise<ActiveInventoryInfo | null> {

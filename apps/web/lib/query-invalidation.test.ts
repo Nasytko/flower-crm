@@ -10,6 +10,7 @@ import {
   keysAfterSupplyDraftSave,
   keysAfterSupplyPaymentChange,
   keysAfterSupplyStockMutation,
+  keysAfterManualWriteOff,
 } from './query-invalidation.ts';
 
 function hasPrefix(keys: readonly unknown[][], prefix: string): boolean {
@@ -82,5 +83,14 @@ describe('query invalidation policy', () => {
   it('inventory start/cancel only touch inventories (freeze)', () => {
     assert.deepEqual(keysAfterInventoryStart(), [['inventories']]);
     assert.deepEqual(keysAfterInventoryCancel(), [['inventories']]);
+  });
+
+  it('manual write-off invalidates products + bouquets (availability), not orders/inventories', () => {
+    const keys = keysAfterManualWriteOff();
+    assert.equal(hasPrefix(keys, 'products'), true);
+    assert.equal(hasPrefix(keys, 'bouquets'), true);
+    assert.equal(hasPrefix(keys, 'orders'), false);
+    assert.equal(hasPrefix(keys, 'inventories'), false);
+    assert.equal(hasPrefix(keys, 'supplies'), false);
   });
 });

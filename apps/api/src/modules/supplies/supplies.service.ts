@@ -52,6 +52,43 @@ const supplyDetailInclude = {
   },
 } as const;
 
+/** List header + names; line aggregates loaded via SQL (no SupplyItem materialization). */
+const supplyListSelect = {
+  id: true,
+  number: true,
+  status: true,
+  documentDate: true,
+  supplierId: true,
+  supplierName: true,
+  paymentDueDate: true,
+  paidAt: true,
+  comment: true,
+  correctionOfSupplyId: true,
+  createdAt: true,
+  postedAt: true,
+  createdBy: { select: { name: true } },
+  postedBy: { select: { name: true } },
+  correctionOf: { select: { number: true } },
+} as const;
+
+export type SupplyLineAggregates = {
+  itemCount: number;
+  totalQuantity: number;
+  totalAmount: Prisma.Decimal;
+};
+
+/** Exact JS equivalent of list SQL: SUM(quantity), SUM(unitPurchasePrice * quantity). */
+export function aggregateSupplyLines(
+  items: Array<{ quantity: number; unitPurchasePrice: Prisma.Decimal }>,
+): SupplyLineAggregates {
+  const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+  const totalAmount = items.reduce(
+    (sum, i) => sum.plus(multiplyMoney(i.unitPurchasePrice, i.quantity)),
+    new Prisma.Decimal(0),
+  );
+  return { itemCount: items.length, totalQuantity, totalAmount };
+}
+
 @Injectable()
 export class SuppliesService {
   constructor(
@@ -69,24 +106,69 @@ export class SuppliesService {
     const [total, rows] = await Promise.all([
       this.prisma.supply.count(),
       this.prisma.supply.findMany({
-        include: {
-          items: true,
-          createdBy: { select: { name: true } },
-          postedBy: { select: { name: true } },
-          correctionOf: { select: { number: true } },
-        },
+        select: supplyListSelect,
         orderBy: [{ createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
     ]);
 
+    const aggregates = await this.loadListLineAggregates(rows.map((row) => row.id));
+
     return {
-      items: rows.map((row) => this.toListItem(row, includePrices)),
+      items: rows.map((row) =>
+        this.toListItem(
+          row,
+          aggregates.get(row.id) ?? {
+            itemCount: 0,
+            totalQuantity: 0,
+            totalAmount: new Prisma.Decimal(0),
+          },
+          includePrices,
+        ),
+      ),
       total,
       page,
       limit,
     };
+  }
+
+  /**
+   * Aggregate supply_items without materializing rows.
+   * totalAmount = SUM(unitPurchasePrice * quantity) — same as multiplyMoney reduce.
+   */
+  private async loadListLineAggregates(supplyIds: string[]) {
+    const map = new Map<string, SupplyLineAggregates>();
+    if (supplyIds.length === 0) {
+      return map;
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        supplyId: string;
+        itemCount: number;
+        totalQuantity: number;
+        totalAmount: Prisma.Decimal | string;
+      }>
+    >`
+      SELECT
+        "supplyId",
+        COUNT(*)::int AS "itemCount",
+        COALESCE(SUM(quantity), 0)::int AS "totalQuantity",
+        COALESCE(SUM("unitPurchasePrice" * quantity), 0) AS "totalAmount"
+      FROM supply_items
+      WHERE "supplyId" IN (${Prisma.join(supplyIds)})
+      GROUP BY "supplyId"
+    `;
+
+    for (const row of rows) {
+      map.set(row.supplyId, {
+        itemCount: row.itemCount,
+        totalQuantity: row.totalQuantity,
+        totalAmount: new Prisma.Decimal(row.totalAmount),
+      });
+    }
+    return map;
   }
 
   async getById(actor: AuthenticatedUser, id: string): Promise<SupplyDetail> {
@@ -818,18 +900,13 @@ export class SuppliesService {
       correctionOfSupplyId: string | null;
       createdAt: Date;
       postedAt: Date | null;
-      items: Array<{ quantity: number; unitPurchasePrice: Prisma.Decimal }>;
       createdBy: { name: string };
       postedBy: { name: string } | null;
       correctionOf: { number: number } | null;
     },
+    aggregates: SupplyLineAggregates,
     includePrices: boolean,
   ): SupplyListItem {
-    const totalQuantity = row.items.reduce((sum, i) => sum + i.quantity, 0);
-    const totalAmount = row.items.reduce(
-      (sum, i) => sum.plus(multiplyMoney(i.unitPurchasePrice, i.quantity)),
-      new Prisma.Decimal(0),
-    );
     const item: SupplyListItem = {
       id: row.id,
       number: row.number,
@@ -844,15 +921,15 @@ export class SuppliesService {
       comment: row.comment,
       correctionOfSupplyId: row.correctionOfSupplyId,
       correctionOfNumber: row.correctionOf?.number ?? null,
-      itemCount: row.items.length,
-      totalQuantity,
+      itemCount: aggregates.itemCount,
+      totalQuantity: aggregates.totalQuantity,
       createdByName: row.createdBy.name,
       postedByName: row.postedBy?.name ?? null,
       createdAt: row.createdAt.toISOString(),
       postedAt: row.postedAt?.toISOString() ?? null,
     };
     if (includePrices) {
-      item.totalAmount = decimalToMoneyString(totalAmount) ?? '0.00';
+      item.totalAmount = decimalToMoneyString(aggregates.totalAmount) ?? '0.00';
     }
     return item;
   }
@@ -893,13 +970,7 @@ export class SuppliesService {
     },
     includePrices: boolean,
   ): SupplyDetail {
-    const list = this.toListItem(
-      {
-        ...row,
-        correctionOf: row.correctionOf,
-      },
-      includePrices,
-    );
+    const list = this.toListItem(row, aggregateSupplyLines(row.items), includePrices);
     const items: SupplyItemDto[] = row.items.map((item) => {
       const dto: SupplyItemDto = {
         id: item.id,

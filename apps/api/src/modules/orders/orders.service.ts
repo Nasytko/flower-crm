@@ -60,6 +60,24 @@ const orderInclude = {
   updatedBy: { select: { id: true, name: true } },
 } satisfies Prisma.OrderInclude;
 
+/** Kanban/list DTO fields only — no createdBy/updatedBy, lean reservation/item selects. */
+const orderListInclude = {
+  items: {
+    select: {
+      quantity: true,
+      nameSnapshot: true,
+      sortOrder: true,
+    },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+  reservations: {
+    select: {
+      requiredQuantity: true,
+      reservedQuantity: true,
+    },
+  },
+} satisfies Prisma.OrderInclude;
+
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
 @Injectable()
@@ -120,20 +138,7 @@ export class OrdersService {
       this.prisma.order.count({ where }),
       this.prisma.order.findMany({
         where,
-        include: {
-          items: {
-            select: {
-              id: true,
-              quantity: true,
-              nameSnapshot: true,
-              sortOrder: true,
-            },
-            orderBy: { sortOrder: 'asc' },
-          },
-          reservations: true,
-          createdBy: { select: { id: true, name: true } },
-          updatedBy: { select: { id: true, name: true } },
-        },
+        include: orderListInclude,
         orderBy,
         skip: (page - 1) * limit,
         take: limit,

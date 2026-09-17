@@ -81,6 +81,16 @@ export function keysAfterInventoryCancel(): QueryKey[] {
   return [inventoriesKey()];
 }
 
+/**
+ * Manual warehouse write-off mutates ProductStock (onHand) + FIFO lots.
+ * Bouquet availableBouquets = min(floor(availableStock / recipeQty)) over FLOWER lines
+ * where availableStock = onHand − reserved — so bouquets must refetch.
+ * Does not touch order rows or inventory freeze.
+ */
+export function keysAfterManualWriteOff(): QueryKey[] {
+  return physicalStockKeys();
+}
+
 async function invalidateKeys(qc: QueryClient, keys: QueryKey[]): Promise<void> {
   await Promise.all(keys.map((queryKey) => qc.invalidateQueries({ queryKey })));
 }
@@ -142,4 +152,8 @@ export async function invalidateAfterInventoryComplete(qc: QueryClient): Promise
 
 export async function invalidateAfterInventoryCancel(qc: QueryClient): Promise<void> {
   await invalidateKeys(qc, keysAfterInventoryCancel());
+}
+
+export async function invalidateAfterManualWriteOff(qc: QueryClient): Promise<void> {
+  await invalidateKeys(qc, keysAfterManualWriteOff());
 }
