@@ -21,7 +21,10 @@ import { StickyActionBar } from '@/components/ui/sticky-action-bar';
 import { cn } from '@/lib/utils';
 import { InventoryStatusBadge } from '@/components/inventories-page';
 import { userFacingError } from '@/lib/api/error-messages';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import {
+  invalidateAfterInventoryCancel,
+  invalidateAfterInventoryComplete,
+} from '@/lib/query-invalidation';
 
 type CountFilter = 'all' | 'uncounted' | 'counted' | 'diff';
 
@@ -98,8 +101,7 @@ export function InventoryDetailPage({ inventoryId }: { inventoryId: string }): R
     onSuccess: async () => {
       setConfirmComplete(false);
       setMessage('Инвентаризация завершена');
-      await queryClient.invalidateQueries({ queryKey: ['inventories'] });
-      await invalidateStockViews(queryClient);
+      await invalidateAfterInventoryComplete(queryClient);
     },
     onError: (err) => {
       setError(userFacingError(err, 'Ошибка завершения'));
@@ -111,8 +113,7 @@ export function InventoryDetailPage({ inventoryId }: { inventoryId: string }): R
     onSuccess: async () => {
       setCancelOpen(false);
       setMessage('Инвентаризация отменена');
-      await queryClient.invalidateQueries({ queryKey: ['inventories'] });
-      await invalidateStockViews(queryClient);
+      await invalidateAfterInventoryCancel(queryClient);
     },
     onError: (err) => {
       setError(userFacingError(err, 'Ошибка отмены'));

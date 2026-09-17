@@ -15,7 +15,10 @@ import {
   postSupply,
 } from '@/lib/api/supplies';
 import { queryKeys } from '@/lib/query-keys';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import {
+  invalidateAfterSupplyPaymentChange,
+  invalidateAfterSupplyStockMutation,
+} from '@/lib/query-invalidation';
 import { SupplyEditor } from '@/components/supply-editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,9 +55,13 @@ export default function SupplyDetailPage(): ReactElement {
     enabled: Boolean(id) && canView,
   });
 
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['supplies'] });
-    await invalidateStockViews(queryClient);
+  const invalidateStockAffecting = async () => {
+    await invalidateAfterSupplyStockMutation(queryClient);
+    await queryClient.invalidateQueries({ queryKey: queryKeys.supply(id) });
+  };
+
+  const invalidatePaymentOnly = async () => {
+    await invalidateAfterSupplyPaymentChange(queryClient);
     await queryClient.invalidateQueries({ queryKey: queryKeys.supply(id) });
   };
 
@@ -63,7 +70,7 @@ export default function SupplyDetailPage(): ReactElement {
     onSuccess: async () => {
       setMessage('Поставка проведена');
       setError(null);
-      await invalidate();
+      await invalidateStockAffecting();
     },
     onError: (err) => setError(userFacingError(err, 'Ошибка проведения')),
   });
@@ -71,7 +78,7 @@ export default function SupplyDetailPage(): ReactElement {
   const correctMutation = useMutation({
     mutationFn: () => correctSupply(id, reason.trim()),
     onSuccess: async (created) => {
-      await invalidate();
+      await invalidateStockAffecting();
       router.push(`/app/supplies/${created.id}`);
     },
     onError: (err) => setError(userFacingError(err, 'Ошибка коррекции')),
@@ -82,7 +89,7 @@ export default function SupplyDetailPage(): ReactElement {
     onSuccess: async () => {
       setMessage('Поставка отменена');
       setError(null);
-      await invalidate();
+      await invalidateStockAffecting();
     },
     onError: (err) => setError(userFacingError(err, 'Ошибка отмены')),
   });
@@ -92,7 +99,7 @@ export default function SupplyDetailPage(): ReactElement {
     onSuccess: async (supply) => {
       setMessage(supply.isPaid ? 'Отмечена как оплаченная' : 'Оплата снята');
       setError(null);
-      await invalidate();
+      await invalidatePaymentOnly();
     },
     onError: (err) => setError(userFacingError(err, 'Ошибка изменения оплаты')),
   });

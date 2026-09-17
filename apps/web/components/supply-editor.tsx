@@ -16,7 +16,11 @@ import {
 import { listSupplierOptions } from '@/lib/api/suppliers';
 import { getActiveInventory } from '@/lib/api/inventories';
 import { queryKeys } from '@/lib/query-keys';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import {
+  invalidateAfterSupplyDraftSave,
+  invalidateAfterSupplyPaymentChange,
+  invalidateAfterSupplyStockMutation,
+} from '@/lib/query-invalidation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -177,11 +181,10 @@ export function SupplyEditor({
       return supply;
     },
     onSuccess: async (supply, andPost) => {
-      await queryClient.invalidateQueries({ queryKey: ['supplies'] });
       if (andPost) {
-        await invalidateStockViews(queryClient);
+        await invalidateAfterSupplyStockMutation(queryClient);
       } else {
-        await queryClient.invalidateQueries({ queryKey: ['products'] });
+        await invalidateAfterSupplyDraftSave(queryClient);
       }
       router.push(`/app/supplies/${supply.id}`);
     },
@@ -201,7 +204,7 @@ export function SupplyEditor({
       setPaidAt(supply.paidAt);
       setPaidByName(supply.paidByName);
       setError(null);
-      await queryClient.invalidateQueries({ queryKey: ['supplies'] });
+      await invalidateAfterSupplyPaymentChange(queryClient);
       await queryClient.invalidateQueries({ queryKey: queryKeys.supply(supply.id) });
     },
     onError: (err) => {

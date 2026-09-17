@@ -30,7 +30,7 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { changeOrderStatus, getBusinessTime, listOrders } from '@/lib/api/orders';
 import { userFacingError } from '@/lib/api/error-messages';
 import { queryKeys } from '@/lib/query-keys';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import { invalidateAfterOrderStatusChange } from '@/lib/query-invalidation';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -275,9 +275,9 @@ export function OrdersKanbanPage(): ReactElement {
         status: input.status,
         expectedVersion: input.expectedVersion,
       }),
-    onSuccess: async () => {
+    onSuccess: async (_detail, variables) => {
       setStatusError(null);
-      await invalidateStockViews(queryClient);
+      await invalidateAfterOrderStatusChange(queryClient, variables.status);
     },
     onError: (err) => {
       setStatusError(userFacingError(err, 'Не удалось сменить статус'));

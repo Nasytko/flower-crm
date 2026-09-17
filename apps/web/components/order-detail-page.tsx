@@ -14,7 +14,7 @@ import {
 import { useAuth } from '@/lib/auth/auth-context';
 import { changeOrderStatus } from '@/lib/api/orders';
 import { userFacingError } from '@/lib/api/error-messages';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import { invalidateAfterOrderStatusChange } from '@/lib/query-invalidation';
 import { OrderEditor } from '@/components/order-editor';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -71,8 +71,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
       setError(null);
       setPending(null);
       setMessage(`Статус: ${orderStatusLabelRu(detail.status, detail.fulfillmentType)}`);
-      await invalidateStockViews(queryClient);
-      await queryClient.invalidateQueries({ queryKey: ['orders', detail.id] });
+      await invalidateAfterOrderStatusChange(queryClient, detail.status);
     },
     onError: (err) => {
       setError(userFacingError(err, 'Не удалось сменить статус'));

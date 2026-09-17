@@ -24,7 +24,7 @@ import { createOrder, getBusinessTime, updateOrder } from '@/lib/api/orders';
 import { ApiClientError } from '@/lib/api/client';
 import { userFacingError } from '@/lib/api/error-messages';
 import { queryKeys } from '@/lib/query-keys';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import { invalidateAfterOrderSave } from '@/lib/query-invalidation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -403,7 +403,7 @@ export function OrderEditor({
       setMessage(mode === 'create' ? 'Заказ создан' : 'Заказ сохранён');
       setError(null);
       setVersion(detail.version);
-      await invalidateStockViews(queryClient);
+      await invalidateAfterOrderSave(queryClient);
       if (mode === 'create') {
         router.push(`/app/orders?date=${detail.fulfillmentDate}`);
       } else {

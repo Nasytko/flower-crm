@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { StatRow } from '@/components/ui/stat-row';
 import { userFacingError } from '@/lib/api/error-messages';
-import { invalidateStockViews } from '@/lib/query-invalidation';
+import { invalidateAfterInventoryStart } from '@/lib/query-invalidation';
 import { cn } from '@/lib/utils';
 
 export function InventoriesPage(): ReactElement {
@@ -43,8 +43,7 @@ export function InventoriesPage(): ReactElement {
     onSuccess: async (detail) => {
       setStartOpen(false);
       setComment('');
-      await invalidateStockViews(queryClient);
-      await queryClient.invalidateQueries({ queryKey: ['inventories'] });
+      await invalidateAfterInventoryStart(queryClient);
       router.push(`/app/inventories/${detail.id}`);
     },
     onError: (err) => {

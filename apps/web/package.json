@@ -8,6 +8,7 @@
     "start": "next start --port 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test lib/query-invalidation.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
   },

@@ -13,7 +13,7 @@ export const queryKeys = {
   activeInventory: ['inventories', 'active'] as const,
   bouquets: (params?: Record<string, unknown>) => ['bouquets', params ?? {}] as const,
   bouquet: (id: string) => ['bouquets', id] as const,
-  businessTime: ['orders', 'business-time'] as const,
+  businessTime: ['business-time'] as const,
   orders: (params?: Record<string, unknown>) => ['orders', params ?? {}] as const,
   order: (id: string) => ['orders', id] as const,
   systemSettings: ['settings', 'system'] as const,
