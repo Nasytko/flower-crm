@@ -62,6 +62,9 @@ jobs:
       - name: Validate Prisma schema
         run: pnpm --filter @erp/database exec prisma validate
 
+      - name: Build database package (generate Prisma client into dist)
+        run: pnpm --filter @erp/database build
+
       - name: Apply database migrations (isolated CI Postgres)
         run: pnpm db:migrate:deploy
 

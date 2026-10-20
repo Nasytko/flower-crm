@@ -18,6 +18,13 @@ describe('Health endpoint', () => {
         ping,
         $disconnect: jest.fn(),
         onModuleDestroy: jest.fn(),
+        // SecurityModule seeds org policy on boot; keep the mock complete.
+        securityPolicy: {
+          upsert: jest.fn().mockResolvedValue({ id: 1 }),
+          findUnique: jest.fn().mockResolvedValue({ id: 1 }),
+          create: jest.fn(),
+          update: jest.fn(),
+        },
       })
       .compile();
 

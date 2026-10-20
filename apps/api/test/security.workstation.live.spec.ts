@@ -65,13 +65,26 @@ describe('Workstation PIN security (live DB)', () => {
   beforeAll(async () => {
     try {
       await prisma.$queryRaw`SELECT 1`;
-      await prisma.securityPolicy.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
     } catch (err) {
       console.warn(
         '[security.workstation.live] NOT RUN: no reachable non-production PostgreSQL (do not use production ERP DB).',
         err instanceof Error ? err.message : err,
       );
       return;
+    }
+
+    if (typeof prisma.securityPolicy?.upsert !== 'function') {
+      throw new Error(
+        'Prisma client is missing securityPolicy — run `pnpm --filter @erp/database build` before live tests',
+      );
+    }
+
+    try {
+      await prisma.securityPolicy.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
+    } catch (err) {
+      throw new Error(
+        `security_policies unavailable after migrate: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     const passwordHash = await hashPassword('LiveTest123!');
