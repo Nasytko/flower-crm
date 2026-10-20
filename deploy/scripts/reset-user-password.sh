@@ -7,27 +7,25 @@
 #   CONFIRM_PRODUCTION_PASSWORD_RESET=YES
 #   RESET_USER_LOGIN
 #   RESET_USER_PASSWORD
+# Optional:
+#   ERP_ENV_FILE=/etc/erpbuket1/production.env
 #
 # Example (password via silent prompt):
 #   read -r -s -p 'New password: ' RESET_USER_PASSWORD; echo
 #   CONFIRM_PRODUCTION_PASSWORD_RESET=YES \
-#   RESET_USER_LOGIN='paulnasytko' \
+#   RESET_USER_LOGIN='operator' \
 #   RESET_USER_PASSWORD="$RESET_USER_PASSWORD" \
 #     ./deploy/scripts/reset-user-password.sh
 #   unset RESET_USER_PASSWORD
 
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${ROOT_DIR}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/erpbuket1-env.sh
+source "${SCRIPT_DIR}/lib/erpbuket1-env.sh"
 
 if [[ "${CONFIRM_PRODUCTION_PASSWORD_RESET:-}" != "YES" ]]; then
   echo "Refusing: set CONFIRM_PRODUCTION_PASSWORD_RESET=YES" >&2
-  exit 1
-fi
-
-if [[ ! -f .env ]]; then
-  echo "Refusing: missing .env" >&2
   exit 1
 fi
 
@@ -36,7 +34,7 @@ fi
 
 echo "[reset-password] updating password for login=${RESET_USER_LOGIN}"
 
-docker compose -f docker-compose.prod.yml run --rm \
+erpbuket1_compose run --rm \
   -e CONFIRM_PRODUCTION_PASSWORD_RESET \
   -e RESET_USER_LOGIN \
   -e RESET_USER_PASSWORD \

@@ -1,19 +1,31 @@
-# Production Compose for NewERP on a single VPS (host Nginx terminates TLS).
+# Production Compose for erpbuket1 (HostFly VPS; host Nginx terminates TLS).
 #
-# Expected host bindings (loopback ONLY):
-#   127.0.0.1:3000 -> web
-#   127.0.0.1:3001 -> api
-# PostgreSQL: NO host port (internal Docker network only).
+# Isolation: separate project/network/volume from shopbuket1 (or any other app).
 #
-# Usage (from repo root, with production .env present):
-#   docker compose -f docker-compose.prod.yml up -d postgres
-#   docker compose -f docker-compose.prod.yml run --rm migrate
-#   docker compose -f docker-compose.prod.yml up -d api web
+# Host bindings (loopback ONLY — configurable):
+#   127.0.0.1:${ERP_WEB_PORT:-3100} -> web  (container :3000)
+#   127.0.0.1:${ERP_API_PORT:-3101} -> api  (container :3001)
+# PostgreSQL: NO host port (Docker network only).
 #
-# NEVER run `docker compose -f docker-compose.prod.yml down -v` on production —
-# that deletes the named PostgreSQL volume.
+# Env file (secrets outside Git):
+#   /etc/erpbuket1/production.env
+#
+# Example:
+#   docker compose --env-file /etc/erpbuket1/production.env -f docker-compose.prod.yml up -d postgres
+#   docker compose --env-file /etc/erpbuket1/production.env -f docker-compose.prod.yml run --rm migrate
+#   docker compose --env-file /etc/erpbuket1/production.env -f docker-compose.prod.yml up -d api web
+#
+# NEVER run `docker compose ... down -v` on production — that deletes the PostgreSQL volume.
+#
+# Ops scripts (see docs/deployment.md):
+#   ./deploy/scripts/install.sh | deploy.sh | status.sh | healthcheck.sh
+#   ./deploy/scripts/backup.sh | restore-postgres.sh | rollback.sh
+#   CONFIRM_NGINX_INSTALL=YES ./deploy/scripts/install-nginx.sh [--mode=http|https]
+#   CONFIRM_CERTBOT=YES ./deploy/scripts/issue-cert.sh
+# Nginx is NEVER modified by install/deploy alone.
 
-name: newerp
+
+name: erpbuket1
 
 x-logging: &default-logging
   driver: json-file
@@ -24,16 +36,15 @@ x-logging: &default-logging
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: newerp-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - newerp_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
-      - newerp_internal
+      - internal
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
@@ -48,16 +59,16 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile.api
       target: migrate
-    container_name: newerp-migrate
     restart: 'no'
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      # Must be a complete URL (URL-encode special characters in the password).
+      DATABASE_URL: ${DATABASE_URL}
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - newerp_internal
+      - internal
     logging: *default-logging
 
   api:
@@ -65,12 +76,11 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile.api
       target: runner
-    container_name: newerp-api
     restart: unless-stopped
     environment:
       NODE_ENV: production
       API_PORT: '3001'
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      DATABASE_URL: ${DATABASE_URL}
       WEB_URL: ${WEB_URL}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
@@ -80,13 +90,15 @@ services:
       AUTH_LOGIN_WINDOW_SECONDS: ${AUTH_LOGIN_WINDOW_SECONDS:-60}
       TRUST_PROXY: ${TRUST_PROXY:-1}
       BUSINESS_TIME_ZONE: ${BUSINESS_TIME_ZONE:-Europe/Minsk}
+      YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
+      YANDEX_SUGGEST_LL: ${YANDEX_SUGGEST_LL:-}
     ports:
-      - '127.0.0.1:3001:3001'
+      - '127.0.0.1:${ERP_API_PORT:-3101}:3001'
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - newerp_internal
+      - internal
     healthcheck:
       test:
         [
@@ -108,20 +120,20 @@ services:
       dockerfile: deploy/docker/Dockerfile.web
       target: runner
       args:
+        # Baked into the Next.js client bundle at image build time (must be public HTTPS origin).
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-    container_name: newerp-web
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: '3000'
       HOSTNAME: 0.0.0.0
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:${ERP_WEB_PORT:-3100}:3000'
     depends_on:
       api:
         condition: service_healthy
     networks:
-      - newerp_internal
+      - internal
     healthcheck:
       test:
         [
@@ -138,10 +150,10 @@ services:
     stop_grace_period: 20s
 
 volumes:
-  newerp_postgres_data:
-    name: newerp_postgres_data
+  postgres_data:
+    name: erpbuket1_postgres_data
 
 networks:
-  newerp_internal:
-    name: newerp_internal
+  internal:
+    name: erpbuket1_internal
     driver: bridge

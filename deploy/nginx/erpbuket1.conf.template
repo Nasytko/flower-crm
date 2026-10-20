@@ -1,0 +1,99 @@
+# erpbuket1 host Nginx template (HTTP + ACME webroot).
+# Rendered by deploy/scripts/install-nginx.sh -- DO NOT copy placeholders live.
+#
+# Placeholders:
+#   __ERP_DOMAIN__
+#   __ERP_WEB_PORT__
+#   __ERP_API_PORT__
+#   __ERP_ACME_WEBROOT__
+#
+# NestJS uses global prefix api/v1 -- proxy_pass MUST NOT strip /api.
+
+upstream erpbuket1_web_upstream {
+    server 127.0.0.1:__ERP_WEB_PORT__;
+    keepalive 8;
+}
+
+upstream erpbuket1_api_upstream {
+    server 127.0.0.1:__ERP_API_PORT__;
+    keepalive 8;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __ERP_DOMAIN__;
+
+    client_max_body_size 1m;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/javascript
+        application/x-javascript
+        application/json
+        application/xml
+        application/xml+rss
+        application/rss+xml
+        application/atom+xml
+        image/svg+xml;
+
+    # Let's Encrypt HTTP-01 (certbot certonly --webroot)
+    location ^~ /.well-known/acme-challenge/ {
+        root __ERP_ACME_WEBROOT__;
+        default_type "text/plain";
+        allow all;
+    }
+
+    # NestJS API -- keep /api/v1/... URI intact. Never cache.
+    location /api/ {
+        proxy_pass http://erpbuket1_api_upstream; # URI preserved (Nest prefix api/v1)
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering off;
+        proxy_pass_header Set-Cookie;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location /_next/static/ {
+        proxy_pass http://erpbuket1_web_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location / {
+        proxy_pass http://erpbuket1_web_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

@@ -1,0 +1,115 @@
+# erpbuket1 host Nginx template (HTTP->HTTPS redirect + TLS server).
+# Rendered by deploy/scripts/install-nginx.sh --mode=https after certbot certonly.
+#
+# Placeholders:
+#   __ERP_DOMAIN__
+#   __ERP_WEB_PORT__
+#   __ERP_API_PORT__
+#   __ERP_ACME_WEBROOT__
+#   __SSL_CERTIFICATE__
+#   __SSL_CERTIFICATE_KEY__
+
+upstream erpbuket1_web_upstream {
+    server 127.0.0.1:__ERP_WEB_PORT__;
+    keepalive 8;
+}
+
+upstream erpbuket1_api_upstream {
+    server 127.0.0.1:__ERP_API_PORT__;
+    keepalive 8;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __ERP_DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __ERP_ACME_WEBROOT__;
+        default_type "text/plain";
+        allow all;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name __ERP_DOMAIN__;
+
+    ssl_certificate     __SSL_CERTIFICATE__;
+    ssl_certificate_key __SSL_CERTIFICATE_KEY__;
+    # Prefer Mozilla intermediate defaults if ssl-params snippet exists on host:
+    # include /etc/letsencrypt/options-ssl-nginx.conf;
+    # ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    client_max_body_size 1m;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/javascript
+        application/x-javascript
+        application/json
+        application/xml
+        application/xml+rss
+        application/rss+xml
+        application/atom+xml
+        image/svg+xml;
+
+    location /api/ {
+        proxy_pass http://erpbuket1_api_upstream; # URI preserved (Nest prefix api/v1)
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_buffering off;
+        proxy_pass_header Set-Cookie;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location /_next/static/ {
+        proxy_pass http://erpbuket1_web_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location / {
+        proxy_pass http://erpbuket1_web_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

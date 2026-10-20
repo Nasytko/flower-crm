@@ -12,7 +12,10 @@ RUN apt-get update \
 WORKDIR /app
 
 FROM base AS build
-ARG NEXT_PUBLIC_API_URL=https://erp.nasytko.ru
+# Public browser API origin (HTTPS). Required at build via compose build arg /
+# --build-arg. No hardcoded production domain — set NEXT_PUBLIC_API_URL in
+# /etc/erpbuket1/production.env (same value as WEB_URL for same-origin cookies).
+ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=development
@@ -23,6 +26,8 @@ COPY packages/shared packages/shared
 # Workspace globs also list api/database — include manifests so the lockfile resolves.
 COPY apps/api/package.json apps/api/
 COPY packages/database/package.json packages/database/
+RUN test -n "${NEXT_PUBLIC_API_URL}" \
+  || (echo "ERROR: NEXT_PUBLIC_API_URL build arg is required (set in production.env)" >&2 && exit 1)
 RUN pnpm install --frozen-lockfile --ignore-scripts \
   && pnpm exec tsc -p packages/shared/tsconfig.json \
   && NODE_ENV=production pnpm --filter @erp/web build

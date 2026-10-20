@@ -11,6 +11,7 @@
 #   BOOTSTRAP_DIRECTOR_PASSWORD
 # Optional:
 #   BOOTSTRAP_DIRECTOR_EMAIL
+#   ERP_ENV_FILE=/etc/erpbuket1/production.env
 #
 # Example:
 #   CONFIRM_PRODUCTION_BOOTSTRAP=YES \
@@ -22,16 +23,12 @@
 
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${ROOT_DIR}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/erpbuket1-env.sh
+source "${SCRIPT_DIR}/lib/erpbuket1-env.sh"
 
 if [[ "${CONFIRM_PRODUCTION_BOOTSTRAP:-}" != "YES" ]]; then
   echo "Refusing: set CONFIRM_PRODUCTION_BOOTSTRAP=YES" >&2
-  exit 1
-fi
-
-if [[ ! -f .env ]]; then
-  echo "Refusing: missing .env" >&2
   exit 1
 fi
 
@@ -41,8 +38,7 @@ fi
 
 echo "[bootstrap] creating first DIRECTOR via production API CLI (one-shot)"
 
-# Pass only bootstrap vars + compose service DATABASE_URL; do not print secrets.
-docker compose -f docker-compose.prod.yml run --rm \
+erpbuket1_compose run --rm \
   -e BOOTSTRAP_DIRECTOR_NAME \
   -e BOOTSTRAP_DIRECTOR_LOGIN \
   -e BOOTSTRAP_DIRECTOR_EMAIL \

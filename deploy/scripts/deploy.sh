@@ -1,101 +1,165 @@
 #!/usr/bin/env bash
-# Conservative NewERP production deploy helper (manual VPS use).
+# erpbuket1 production deploy (update or controlled first bring-up).
 #
-# FIRST DEPLOY (empty volume):
-#   FIRST_DEPLOY=1 ./deploy/scripts/deploy.sh
+# Operates on the CURRENT git working tree only -- does not git pull / reset.
 #
-# NORMAL UPDATE:
+# Usage (from /opt/erpbuket1):
 #   ./deploy/scripts/deploy.sh
 #
-# Does NOT: git reset --hard, seed production, prune volumes, or hide failures.
+# Optional:
+#   ERP_ENV_FILE=/etc/erpbuket1/production.env
+#   ALLOW_DIRTY=1
+#   SKIP_BUILD=1
+#   HEALTH_RETRIES=45 HEALTH_SLEEP=2
+#   ALLOW_NONSTANDARD_APP_DIR=1
+#
+# Emergency only (existing DB):
+#   SKIP_BACKUP=1 CONFIRM_SKIP_BACKUP=YES I_UNDERSTAND_DATA_LOSS_RISK=YES
+#
+# Does NOT: git reset --hard, down -v, volume/system prune, seed/bootstrap,
+#           touch shopbuket1, modify Nginx.
+# Zero-downtime is NOT promised. Automatic app/DB rollback is NOT implemented.
 
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${ROOT_DIR}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/erpbuket1-env.sh
+source "${SCRIPT_DIR}/lib/erpbuket1-env.sh"
 
-COMPOSE=(docker compose -f docker-compose.prod.yml)
-FIRST_DEPLOY="${FIRST_DEPLOY:-0}"
-SKIP_BACKUP="${SKIP_BACKUP:-0}"
-HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
+HEALTH_RETRIES="${HEALTH_RETRIES:-45}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-2}"
 
-log() { echo "[deploy] $*"; }
-die() { echo "[deploy] ERROR: $*" >&2; exit 1; }
+log() { erpbuket1_log "deploy: $*"; }
+die() { erpbuket1_die "deploy: $*"; }
 
-[[ -f .env ]] || die "missing .env in ${ROOT_DIR}"
-command -v docker >/dev/null || die "docker not found"
-docker compose version >/dev/null || die "docker compose plugin not found"
+check_git_tree() {
+  command -v git >/dev/null || die "git not found"
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    die "not a git repository"
+  fi
+  local dirty
+  dirty="$(git status --porcelain 2>/dev/null || true)"
+  if [[ -n "${dirty}" && "${ALLOW_DIRTY:-0}" != "1" ]]; then
+    die "working tree is dirty; commit/stash changes or set ALLOW_DIRTY=1"
+  fi
+  if [[ -n "${dirty}" ]]; then
+    erpbuket1_warn "deploy: dirty working tree allowed (ALLOW_DIRTY=1)"
+  fi
+  GIT_SHA="$(git rev-parse HEAD)"
+  GIT_SHORT="$(git rev-parse --short HEAD)"
+  GIT_DESC="$(git log -1 --pretty=format:'%h %s' 2>/dev/null || echo "${GIT_SHORT}")"
+  log "release: ${GIT_DESC}"
+}
 
-log "preflight compose config"
-"${COMPOSE[@]}" config >/dev/null
+require_backup_or_emergency_skip() {
+  local state="$1"
+  if [[ "${state}" != "existing" ]]; then
+    log "DB state=${state} -- no pre-migration backup required"
+    return 0
+  fi
 
-if [[ "${FIRST_DEPLOY}" != "1" && "${SKIP_BACKUP}" != "1" ]]; then
-  if docker ps --format '{{.Names}}' | grep -qx 'newerp-postgres'; then
-    log "backup before update"
-    ./deploy/scripts/backup-postgres.sh
+  if [[ "${SKIP_BACKUP:-0}" == "1" ]]; then
+    if [[ "${CONFIRM_SKIP_BACKUP:-}" != "YES" || "${I_UNDERSTAND_DATA_LOSS_RISK:-}" != "YES" ]]; then
+      die "SKIP_BACKUP=1 on existing DB requires CONFIRM_SKIP_BACKUP=YES and I_UNDERSTAND_DATA_LOSS_RISK=YES"
+    fi
+    erpbuket1_warn "deploy: EMERGENCY skip backup on EXISTING database (operator confirmed)"
+    return 0
+  fi
+
+  log "existing DB -- ensuring postgres is up before backup"
+  erpbuket1_ensure_postgres_ready "${HEALTH_RETRIES}" "${HEALTH_SLEEP}"
+
+  log "backup before migrate"
+  BACKUP_DIR="${BACKUP_DIR:-${ERP_BACKUP_DIR_DEFAULT}}" \
+    "${SCRIPT_DIR}/backup-postgres.sh" || die "backup failed -- deploy aborted (migrate not run)"
+}
+
+main() {
+  local db_state db_state_for_backup
+  DEPLOY_OK=0
+
+  erpbuket1_setup_tmp_trap
+  erpbuket1_acquire_lock
+  erpbuket1_require_app_dir
+
+  local root
+  root="$(erpbuket1_root_dir)"
+  cd "${root}"
+
+  log "preflight"
+  erpbuket1_check_commands git curl openssl
+  erpbuket1_check_docker
+  erpbuket1_check_resources
+  check_git_tree
+  erpbuket1_validate_env
+  erpbuket1_load_ports
+  erpbuket1_check_ports_available
+  erpbuket1_check_shop_coexistence
+
+  db_state="$(erpbuket1_require_safe_db_state_for_deploy)"
+
+  if [[ "${db_state}" == "fresh" ]]; then
+    log "fresh: new postgres volume will be created on first postgres start"
+  fi
+  if [[ "${db_state}" == "existing" || "${db_state}" == "volume_unproven" ]]; then
+    # After successful provenance gate, ensure marker exists for future runs
+    :
+  fi
+  # Backup required for existing OR operator-accepted unproven volume (treated as data-bearing)
+  if [[ "${db_state}" == "volume_unproven" ]]; then
+    db_state_for_backup="existing"
   else
-    log "postgres container not running — skipping backup"
+    db_state_for_backup="${db_state}"
   fi
-else
-  log "skipping backup (FIRST_DEPLOY or SKIP_BACKUP)"
-fi
 
-log "git revision: $(git rev-parse --short HEAD 2>/dev/null || echo 'n/a')"
+  log "compose config validation"
+  erpbuket1_compose config >/dev/null || die "compose config invalid"
 
-log "build images"
-"${COMPOSE[@]}" build
+  # Backup BEFORE build/migrate for data-bearing DBs (even if postgres was stopped).
+  require_backup_or_emergency_skip "${db_state_for_backup}"
 
-log "start postgres"
-"${COMPOSE[@]}" up -d postgres
-
-log "wait for postgres healthy"
-for _ in $(seq 1 "${HEALTH_RETRIES}"); do
-  status="$("${COMPOSE[@]}" ps --format json postgres 2>/dev/null | head -n1 || true)"
-  if "${COMPOSE[@]}" exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
-    break
+  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
+    log "SKIP_BUILD=1 -- not rebuilding images"
+  else
+    log "building images"
+    erpbuket1_compose build || die "image build failed -- API/Web not switched"
   fi
-  sleep "${HEALTH_SLEEP}"
-done
-"${COMPOSE[@]}" exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  || die "postgres not ready"
 
-log "prisma migrate deploy"
-if ! "${COMPOSE[@]}" run --rm migrate; then
-  die "migration failed — application NOT updated; investigate before retry"
-fi
+  # Always ensure postgres before migrate (fresh or existing).
+  erpbuket1_ensure_postgres_ready "${HEALTH_RETRIES}" "${HEALTH_SLEEP}"
 
-log "start api + web"
-"${COMPOSE[@]}" up -d api web
-
-log "wait for API readiness"
-ok=0
-for _ in $(seq 1 "${HEALTH_RETRIES}"); do
-  if curl -fsS "http://127.0.0.1:3001/api/v1/health" >/dev/null 2>&1; then
-    ok=1
-    break
+  log "prisma migrate deploy"
+  if ! erpbuket1_compose run --rm migrate; then
+    die "migration failed -- API/Web NOT updated; no automatic DB rollback"
   fi
-  sleep "${HEALTH_SLEEP}"
-done
-[[ "${ok}" == "1" ]] || die "API health check failed"
 
-log "wait for WEB"
-ok=0
-for _ in $(seq 1 "${HEALTH_RETRIES}"); do
-  if curl -fsS "http://127.0.0.1:3000/login" >/dev/null 2>&1; then
-    ok=1
-    break
+  log "updating api + web (compose up -d; no down -v)"
+  erpbuket1_compose up -d api web || die "failed to start api/web"
+
+  log "healthcheck (internal)"
+  if ! HEALTH_RETRIES="${HEALTH_RETRIES}" HEALTH_SLEEP="${HEALTH_SLEEP}" \
+    "${SCRIPT_DIR}/healthcheck.sh" --mode=internal; then
+    die "healthcheck failed after deploy -- do NOT assume success; inspect logs"
   fi
-  sleep "${HEALTH_SLEEP}"
-done
-[[ "${ok}" == "1" ]] || die "WEB health check failed"
 
-log "compose ps"
-"${COMPOSE[@]}" ps
+  erpbuket1_write_install_marker
+  DEPLOY_OK=1
 
-log "SUCCESS"
-log "smoke: curl -fsS http://127.0.0.1:3001/api/v1/health"
-log "public: https://erp.nasytko.ru (after Nginx + Certbot)"
-if [[ "${FIRST_DEPLOY}" == "1" ]]; then
-  log "FIRST DEPLOY: create initial users via documented bootstrap (seed is NOT auto-run)"
-fi
+  echo
+  log "======== DEPLOY REPORT ========"
+  log "status: SUCCESS"
+  log "git: ${GIT_DESC}"
+  log "sha: ${GIT_SHA}"
+  log "db_state: ${db_state}"
+  log "env: ${ERP_ENV_FILE}"
+  log "project: ${ERP_COMPOSE_PROJECT}"
+  log "web loopback: http://127.0.0.1:${ERP_WEB_PORT}/login"
+  log "api loopback: http://127.0.0.1:${ERP_API_PORT}/api/v1/health"
+  erpbuket1_compose ps
+  log "NOTE: public HTTPS requires ./deploy/scripts/install-nginx.sh (+ issue-cert.sh)"
+  log "NOTE: bootstrap users is manual (bootstrap-initial-users.sh)"
+  log "NOTE: automatic rollback is NOT implemented"
+  log "==============================="
+}
+
+main "$@"

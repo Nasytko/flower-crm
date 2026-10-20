@@ -1,123 +1,141 @@
-# Production deployment — NewERP (Flower CRM)
+# Production deployment — erpbuket1 (HostFly)
 
-Domain: `https://erp.nasytko.ru`  
-VPS path: `/opt/apps/newerp`  
-Backups: `/opt/backups/postgres`  
-Compose file: `docker-compose.prod.yml`
+ERP/CRM for the flower shop, deployed **independently** alongside the existing
+internet shop `shopbuket1` on the same VPS.
 
-This document prepares a **manual** first deploy and updates on Ubuntu 24.04 with
-**host Nginx** (not containerized). NewERP must not monopolize the VPS — a future
-shop can share the host.
+| Item | Value |
+|------|--------|
+| App path | `/opt/erpbuket1` |
+| Secrets | `/etc/erpbuket1/production.env` (chmod 600, **outside Git**) |
+| Backups | `/var/backups/erpbuket1` (chmod 700) |
+| State marker | `/var/lib/erpbuket1/install.marker` |
+| Compose project | `erpbuket1` |
+| Compose file | `docker-compose.prod.yml` |
+| Loopback ports | `127.0.0.1:3100` (web), `127.0.0.1:3101` (api) — configurable |
+| Public surface | Host Nginx `:80` / `:443` only |
 
-## Architecture
+**Installing or updating ERP must never modify shopbuket1 containers, volumes,
+networks, or Nginx vhosts.**
+
+> A new ERP install does **not** automatically migrate data from an old server.
+> Data transfer is a separate, manual restore from an `erpbuket1_*.dump` backup.
+
+---
+
+## 1. Architecture and isolation from the shop
 
 ```text
 Internet
    |
    v
-Host Nginx :80/:443  (Certbot TLS)
+Host Nginx :80/:443  (TLS for ERP_DOMAIN only)
    |
-   +--> erp.nasytko.ru/
-   |         -> 127.0.0.1:3000  (newerp-web / Next.js)
-   |
-   +--> erp.nasytko.ru/api/...
-             -> 127.0.0.1:3001  (newerp-api / NestJS /api/v1)
+   +--> https://ERP_DOMAIN/              -> 127.0.0.1:ERP_WEB_PORT  (Next.js)
+   +--> https://ERP_DOMAIN/api/...       -> 127.0.0.1:ERP_API_PORT  (NestJS api/v1)
+   +--> https://ERP_DOMAIN/_next/static/ -> web (long cache)
                     |
                     v
-             newerp-postgres (Docker network only, NO host port)
+             erpbuket1_postgres (Docker network erpbuket1_internal ONLY)
+             volume: erpbuket1_postgres_data
 ```
 
-**External surface must be only:** `22`, `80`, `443`.  
-**Must NOT be public:** `3000`, `3001`, `5432`.
+Isolation:
 
-Same-origin browser API URL (`NEXT_PUBLIC_API_URL=https://erp.nasytko.ru`) keeps
-refresh cookies (`Path=/api/v1/auth`) on the ERP host.
+| Resource | ERP | Shop (typical) |
+|----------|-----|----------------|
+| Compose project | `erpbuket1` | `shopbuket1` |
+| Volume | `erpbuket1_postgres_data` | shop-owned name |
+| Network | `erpbuket1_internal` | shop-owned |
+| Host ports | 3100/3101 loopback | other ports |
+| Nginx file | `/etc/nginx/sites-available/erpbuket1.conf` | shop vhost files |
+| Env | `/etc/erpbuket1/production.env` | shop env |
 
-## Prerequisites (VPS)
+PostgreSQL has **no host port**. API/Web bind **127.0.0.1 only**.
 
-- Ubuntu 24.04 LTS
+Same-origin cookies: `WEB_URL` and `NEXT_PUBLIC_API_URL` must both be
+`https://ERP_DOMAIN`. Refresh cookie path is `/api/v1/auth` (Secure in production).
+`TRUST_PROXY=1` so Nest trusts `X-Forwarded-*` from host Nginx.
+
+---
+
+## 2. VPS requirements
+
+- Ubuntu 24.04 LTS (target)
 - Docker Engine + Compose plugin
-- Git
-- Nginx on the host
-- UFW allowing 22/80/443 (managed manually)
-- DNS `A`/`AAAA` for `erp.nasytko.ru` pointing at the VPS
+- Git, curl, openssl
+- Host Nginx + Certbot (for public HTTPS)
+- Free disk for images + dumps (several GB)
+- UFW allowing 22/80/443 (operator-managed)
+- Ports **3100** and **3101** free on loopback (or change in env)
+
+Do **not** install ERP tooling into the shop project directory.
+
+---
+
+## 3. DNS
+
+Create `A` / `AAAA` for `ERP_DOMAIN` pointing at this VPS **before** Certbot.
 
 ```bash
-sudo mkdir -p /opt/apps /opt/backups/postgres
-sudo chown "$USER":"$USER" /opt/apps /opt/backups/postgres
+# On the VPS (example checks)
+getent ahostsv4 your.erp.domain
 ```
 
-## 1. Clone
+Shop DNS records stay unchanged.
+
+---
+
+## 4. Obtain the repository
 
 ```bash
-cd /opt/apps
-git clone https://github.com/Nasytko/flower-crm.git newerp
-cd /opt/apps/newerp
+sudo mkdir -p /opt/erpbuket1
+sudo chown "$USER":"$USER" /opt/erpbuket1
+git clone https://github.com/Nasytko/flower-crm.git /opt/erpbuket1
+cd /opt/erpbuket1
 ```
 
-## 2. Production `.env`
+For non-standard paths set `ALLOW_NONSTANDARD_APP_DIR=1` on scripts.
+
+---
+
+## 5–9. First install (app stack)
+
+Preferred single entrypoint (interactive env creation, postgres, migrate, api/web, internal healthcheck):
 
 ```bash
-cp .env.example .env
-chmod 600 .env
+cd /opt/erpbuket1
+./deploy/scripts/install.sh
 ```
 
-Edit `.env` (minimum):
+What `install.sh` does:
+
+1. Preflight (Docker, disk, ports, shop coexistence hint)
+2. Creates `/etc/erpbuket1/production.env` if missing (URL-safe secrets)
+3. `docker compose build`
+4. Starts **postgres**, waits for readiness
+5. `prisma migrate deploy` (migrate service)
+6. Starts **api** + **web**
+7. `./deploy/scripts/healthcheck.sh --mode=internal`
+8. Writes `/var/lib/erpbuket1/install.marker`
+
+What it does **not** do: Nginx, Certbot, user bootstrap, `down -v`, shop changes.
+
+### Manual env (non-interactive)
 
 ```bash
-NODE_ENV=production
-WEB_URL=https://erp.nasytko.ru
-NEXT_PUBLIC_API_URL=https://erp.nasytko.ru
-TRUST_PROXY=1
-BUSINESS_TIME_ZONE=Europe/Minsk
-POSTGRES_USER=newerp
-POSTGRES_PASSWORD='PASTE_OPENSSL_SECRET'
-POSTGRES_DB=flower_crm
-JWT_ACCESS_SECRET='PASTE_OPENSSL_SECRET'
+sudo mkdir -p /etc/erpbuket1 /var/backups/erpbuket1 /var/lib/erpbuket1
+sudo cp deploy/env/production.env.example /etc/erpbuket1/production.env
+sudo chmod 600 /etc/erpbuket1/production.env
+sudo nano /etc/erpbuket1/production.env
+# Replace every CHANGE_ME / example.com value.
+# Keep WEB_URL == NEXT_PUBLIC_API_URL == https://ERP_DOMAIN
+# DATABASE_URL host must be compose service "postgres"
+NONINTERACTIVE=1 ./deploy/scripts/install.sh
 ```
 
-### Secret generation
+### First DIRECTOR (manual, once)
 
-```bash
-openssl rand -base64 32   # POSTGRES_PASSWORD (prefer URL-safe / avoid @ : / ?)
-openssl rand -base64 48   # JWT_ACCESS_SECRET
-```
-
-If `POSTGRES_PASSWORD` contains URL-reserved characters, URL-encode them inside
-any manually built `DATABASE_URL`. Compose builds `DATABASE_URL` from
-`POSTGRES_*` for containers.
-
-**Never commit `.env`. Never bake `.env` into images.**
-
-## 3. First deploy
-
-```bash
-cd /opt/apps/newerp
-chmod +x deploy/scripts/*.sh
-
-# Build + postgres + migrate + api/web (no backup on empty volume)
-FIRST_DEPLOY=1 ./deploy/scripts/deploy.sh
-```
-
-Or step-by-step:
-
-```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d postgres
-docker compose -f docker-compose.prod.yml run --rm migrate   # MUST succeed
-docker compose -f docker-compose.prod.yml up -d api web
-docker compose -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:3001/api/v1/health
-curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
-```
-
-### Initial DIRECTOR (explicit — not automatic)
-
-Development `prisma/seed` **refuses** `NODE_ENV=production` and is **not** used here.
-API start does **not** auto-create users.
-
-Create the first DIRECTOR once against an empty `User` table (credentials are
-ephemeral env vars — never commit them, never put them in `docker-compose.prod.yml`):
+Only on an empty User table:
 
 ```bash
 CONFIRM_PRODUCTION_BOOTSTRAP=YES \
@@ -128,233 +146,358 @@ BOOTSTRAP_DIRECTOR_PASSWORD='your-strong-password-min-10' \
   ./deploy/scripts/bootstrap-initial-users.sh
 ```
 
-`BOOTSTRAP_DIRECTOR_EMAIL` is optional. Password rules match employee create
-(min 10 chars). Re-running after any user exists fails safely (one-shot).
+Never commit these credentials. Change the password after first login if desired.
 
-## 4. Host Nginx
+---
 
-Repo file `deploy/nginx/erp.nasytko.ru.conf` is a **reference/template**
-(gzip, `/_next/static/` immutable cache, upstream keepalive). Production may
-already have Certbot TLS/HSTS blocks — **do not blindly overwrite** the live
-vhost.
+## 10–12. Nginx, TLS, HTTPS check
 
-### First install (HTTP only, before Certbot)
+**Separate confirmations** — never run from plain `install.sh` / `deploy.sh`.
+
+### HTTP vhost + ACME webroot
 
 ```bash
-sudo cp /opt/apps/newerp/deploy/nginx/erp.nasytko.ru.conf \
-  /etc/nginx/sites-available/erp.nasytko.ru.conf
-sudo ln -sf /etc/nginx/sites-available/erp.nasytko.ru.conf \
-  /etc/nginx/sites-enabled/erp.nasytko.ru.conf
-sudo nginx -t && sudo systemctl reload nginx
+CONFIRM_NGINX_INSTALL=YES ./deploy/scripts/install-nginx.sh --mode=http
 ```
 
-Ensure DNS points to this VPS, then:
+Creates/updates **only** `/etc/nginx/sites-available/erpbuket1.conf`,
+`nginx -t`, then reload. Refuses duplicate `server_name` on other vhosts.
+On failure restores the previous **ERP** file only (shop untouched).
+
+### Certificate (webroot — does not use `certbot --nginx`)
 
 ```bash
-sudo certbot --nginx -d erp.nasytko.ru
+CONFIRM_CERTBOT=YES CERTBOT_EMAIL=ops@example.com ./deploy/scripts/issue-cert.sh
 ```
 
-### Later updates (after Certbot) — merge, do not overwrite
+Requires DNS and the HTTP ERP vhost. Writes cert under
+`/etc/letsencrypt/live/ERP_DOMAIN/`. Shop certs are not modified.
+
+### Enable HTTPS + redirect
 
 ```bash
-# 1) Backup live config
-sudo cp /etc/nginx/sites-available/erp.nasytko.ru.conf \
-  /etc/nginx/sites-available/erp.nasytko.ru.conf.bak.$(date +%Y%m%d%H%M%S)
-
-# 2) Compare live vs repo template
-sudo cat /etc/nginx/sites-available/erp.nasytko.ru.conf
-diff -u /etc/nginx/sites-available/erp.nasytko.ru.conf \
-  /opt/apps/newerp/deploy/nginx/erp.nasytko.ru.conf || true
-
-# 3) Manually merge: gzip, upstream keepalive, /_next/static/ Cache-Control
-#    Keep Certbot listen 443 / ssl_certificate / redirect blocks intact.
-
-# 4) Test + reload (never restart casually)
-sudo nginx -t && sudo systemctl reload nginx
+CONFIRM_NGINX_INSTALL=YES ./deploy/scripts/install-nginx.sh --mode=https
+./deploy/scripts/healthcheck.sh --mode=public
 ```
 
-Verify:
+Renewal: host `certbot renew` timer/cron; dry-run: `certbot renew --dry-run`.
+
+---
+
+## 13. Update ERP
 
 ```bash
-curl -fsS https://erp.nasytko.ru/api/v1/health
-curl -sI https://erp.nasytko.ru/login | head
-# Open https://erp.nasytko.ru/login and sign in
+cd /opt/erpbuket1
+git pull   # or fetch a known release tag
+./deploy/scripts/deploy.sh
 ```
 
-## 5. Backup + restore test
+`deploy.sh`:
+
+1. flock lock, validate env, ports
+2. If DB **existing**: start postgres if needed → **backup** → then build → migrate → up api/web
+3. Internal healthcheck
+4. Does **not** modify Nginx/Certbot/shop
+
+Emergency skip backup (existing DB only):
 
 ```bash
+SKIP_BACKUP=1 CONFIRM_SKIP_BACKUP=YES I_UNDERSTAND_DATA_LOSS_RISK=YES \
+  ./deploy/scripts/deploy.sh
+```
+
+Dirty tree: `ALLOW_DIRTY=1 ./deploy/scripts/deploy.sh`
+
+---
+
+## 14. Backup
+
+```bash
+./deploy/scripts/backup.sh
+# equivalent:
 ./deploy/scripts/backup-postgres.sh
-ls -lah /opt/backups/postgres
 ```
 
-**Test restore into a disposable DB** (never overwrite production silently):
+Behaviour:
+
+- Writes `/var/backups/erpbuket1/erpbuket1_YYYYMMDDTHHMMSSZ.dump`
+- `umask 077`, dir `700`, files `600`
+- Atomic write: `.partial` → `mv`
+- Verifies non-empty + `PGDMP` magic
+- Uses compose project `erpbuket1` only (never shop postgres)
+- **Auto-delete is OFF by default**
+
+Documented retention: keep **14–30 days** of dumps locally; prune only after
+confirming several recent successful dumps exist:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  sh -c 'createdb -U "$POSTGRES_USER" flower_crm_restore_test || true'
-
-TARGET_DB=flower_crm_restore_test CONFIRM_RESTORE=YES \
-  ./deploy/scripts/restore-postgres.sh /opt/backups/postgres/newerp_YYYYMMDDTXXXXXXZ.dump
+PRUNE_BACKUPS=1 CONFIRM_BACKUP_PRUNE=YES RETENTION_DAYS=14 MIN_KEEP_SUCCESSFUL=3 \
+  ./deploy/scripts/backup.sh
 ```
 
-Drop the test DB when done:
+Failed deploy does **not** delete backups.
 
-```bash
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  sh -c 'dropdb -U "$POSTGRES_USER" flower_crm_restore_test'
-```
+### Off-site copies
 
-### Cron (root) — example daily 02:15
+Copy dumps to another server or encrypted storage (scp/rsync/USB).
+**Do not** use the shop’s S3/object storage without a separate agreement.
+
+Cron example (operator-owned):
 
 ```cron
-15 2 * * * cd /opt/apps/newerp && /opt/apps/newerp/deploy/scripts/backup-postgres.sh >> /var/log/newerp-backup.log 2>&1
-```
-
-Local retention default: **7 days**.  
-**A backup only on this VPS is insufficient disaster recovery** — copy dumps off-box.
-
-## 6. Reboot check
-
-```bash
-sudo reboot
-# after reboot:
-docker compose -f /opt/apps/newerp/docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:3001/api/v1/health
-sudo systemctl status nginx --no-pager
-```
-
-Containers use `restart: unless-stopped`. Enable Docker on boot if needed:
-
-```bash
-sudo systemctl enable docker
+15 2 * * * cd /opt/erpbuket1 && ./deploy/scripts/backup.sh >> /var/log/erpbuket1-backup.log 2>&1
 ```
 
 ---
 
-## Normal update
+## 15. Restore
+
+Never automatic on deploy. Prefer restore into a **disposable** database first.
 
 ```bash
-cd /opt/apps/newerp
-git fetch origin
-git checkout main
-git pull --ff-only origin main
+# Create test DB inside ERP postgres (not shop):
+ERP_ENV_FILE=/etc/erpbuket1/production.env \
+  docker compose --env-file "$ERP_ENV_FILE" -f docker-compose.prod.yml --project-name erpbuket1 \
+    exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" flower_crm_restore_test || true'
 
-./deploy/scripts/deploy.sh
-# (backs up → build → migrate deploy → up → health)
+TARGET_DB=flower_crm_restore_test CONFIRM_RESTORE=YES \
+  ./deploy/scripts/restore-postgres.sh /var/backups/erpbuket1/erpbuket1_YYYYMMDDTHHMMSSZ.dump
 ```
 
-Manual equivalent:
+Production overwrite (incident only — takes a safety backup first):
 
 ```bash
-./deploy/scripts/backup-postgres.sh
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d api web
-curl -fsS http://127.0.0.1:3001/api/v1/health
+TARGET_DB=flower_crm CONFIRM_RESTORE=YES \
+CONFIRM_PRODUCTION_RESTORE=YES I_UNDERSTAND_DESTRUCTIVE_RESTORE=YES \
+  ./deploy/scripts/restore-postgres.sh /var/backups/erpbuket1/erpbuket1_YYYYMMDDTHHMMSSZ.dump
 ```
 
-### If something fails
-
-| Failure         | Action                                                                                                                 |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Build fails     | Fix code/deps; do **not** migrate yet                                                                                  |
-| Migration fails | Deploy stops; app keeps previous containers if you did not recreate them — investigate migration; **do not** `db push` |
-| API unhealthy   | `docker compose -f docker-compose.prod.yml logs --tail=200 api`                                                        |
-| Web unhealthy   | `docker compose -f docker-compose.prod.yml logs --tail=200 web`                                                        |
-| DB unhealthy    | `docker compose -f docker-compose.prod.yml logs --tail=200 postgres`                                                   |
-| Disk full       | `df -h`; `docker system df`; remove old **images** carefully; **never** prune volumes                                  |
+Guards: SQL identifier validation, refuse shop-like names, refuse lost-volume state,
+require dump `PGDMP` magic.
 
 ---
 
-## Rollback
+## 16. Rollback (application images)
 
-### Application
+Rolls back **container images** built from an older git revision. Does **not**
+downgrade PostgreSQL / Prisma. Primary checkout stays on its branch (temporary
+**git worktree**; no `git reset --hard`, no detached HEAD on `/opt/erpbuket1`).
 
 ```bash
-git log --oneline -10
-git checkout <previous-good-sha>
-./deploy/scripts/deploy.sh
+CONFIRM_ROLLBACK=YES ROLLBACK_TO=<git-sha-or-tag> ./deploy/scripts/rollback.sh
 ```
 
-Rebuild/redeploy that commit. If a **new Prisma migration** already ran, older app code may be incompatible.
+Behaviour:
 
-### Database
+1. Optional dirty-tree check on the primary tree
+2. Backup of existing DB
+3. **Prisma compatibility:** compares `_prisma_migrations` in live DB to migration
+   dirs present in `ROLLBACK_TO`. If the DB has migrations absent from that
+   revision → **fail closed** unless you explicitly accept risk:
+   `CONFIRM_ROLLBACK_WITH_NEWER_SCHEMA=YES` (schema still not downgraded)
+4. `git worktree add` → build/up api+web from that tree → remove worktree
+5. Internal healthcheck (HTTP only — **not** sole proof of compatibility)
+6. Primary `git` HEAD/branch unchanged
 
-- Prisma migrations are **forward-only**.
-- Rolling back the app **does not** roll back schema.
-- Restore from `pg_dump` only as a deliberate incident procedure (`CONFIRM_RESTORE=YES`).
+**Next normal update:** `git pull && ./deploy/scripts/deploy.sh` (forward path).
+
+**Prefer a forward-fix release** over rolling back past applied migrations.
+If the app misbehaves after image rollback: restore a matching dump or deploy a fix forward.
 
 ---
 
-## Dangerous commands
+## 17. Diagnostics
 
 ```bash
-# SAFE: stops containers, KEEPS postgres volume
-docker compose -f docker-compose.prod.yml down
+./deploy/scripts/status.sh
+./deploy/scripts/healthcheck.sh --mode=internal
+./deploy/scripts/healthcheck.sh --mode=public   # after HTTPS
 
-# DESTROYS DATABASE VOLUME — never use in normal ops
-docker compose -f docker-compose.prod.yml down -v
+ERP_ENV_FILE=/etc/erpbuket1/production.env \
+  docker compose --env-file "$ERP_ENV_FILE" -f docker-compose.prod.yml --project-name erpbuket1 logs -f api web
 ```
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Port in use | Another process / shop; change `ERP_*_PORT` or free port |
+| migrate fail | Fix SQL/migration; no auto DB rollback |
+| healthcheck fail | Inspect logs; do not assume success |
+| public HTTPS fail | DNS, Nginx, or cert missing |
+| cookie/login fail over HTTP | Production cookies are Secure — need HTTPS |
 
 ---
 
-## Logging
+## 18. After VPS reboot
+
+Docker `restart: unless-stopped` should bring ERP containers back. Verify:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs --tail=200 api
-docker compose -f docker-compose.prod.yml logs -f web
+./deploy/scripts/status.sh
+./deploy/scripts/healthcheck.sh --mode=internal
+# if public TLS was configured:
+./deploy/scripts/healthcheck.sh --mode=public
 ```
 
-JSON-file log rotation is configured in Compose (`max-size=10m`, `max-file=5`).
-
-API logs go to stdout via Pino (no secrets: auth headers/cookies redacted).
+Host Nginx/Certbot are systemd services — ensure they are enabled.
 
 ---
 
-## Disk
+## 19. Check the shop before and after ERP work
+
+Before and after install/deploy/nginx:
 
 ```bash
-df -h
-docker system df
+# Shop compose project name may differ — use whatever is already on the VPS
+docker compose ls
+# Hit the shop’s public URL in a browser or curl (operator knows the shop domain)
 ```
 
-Safe-ish image cleanup (does **not** remove named volumes):
-
-```bash
-docker image prune
-```
-
-**Never** run `docker volume prune` on production without understanding it can delete unused volumes — the Postgres data volume must never be casually deleted.
+ERP scripts must not stop shop containers. If the shop breaks after an ERP Nginx
+reload, restore **only** `/etc/nginx/sites-available/erpbuket1.conf` from its
+`.bak.*` file (install-nginx keeps backups) and `nginx -t && systemctl reload nginx`.
+Do not edit shop vhost files from ERP docs/scripts.
 
 ---
 
-## Health endpoints
+## 20. Three different operations (do not mix)
 
-| URL                       | Meaning                                        |
-| ------------------------- | ---------------------------------------------- |
-| `GET /api/v1/health/live` | Process up (no DB)                             |
-| `GET /api/v1/health`      | Readiness: API + PostgreSQL (`503` if DB down) |
+| Mode | Goal | Entry |
+|------|------|--------|
+| **Fresh install** | Empty new ERP on HostFly | `install.sh` with no prior marker/containers/volume |
+| **Migration from old ERP** | Bring data from another server | Install empty stack **first**, then restore dump (below) |
+| **Disaster recovery** | Volume lost on **this** VPS | Manual recovery — **not** `install.sh` |
 
-Docker API healthcheck uses `/api/v1/health`.
+Dump files under `/var/backups/erpbuket1/` are **not** treated as proof that a
+volume was lost. Nginx ERP vhost alone is **not** proof that a DB existed.
+
+### State machine (summary)
+
+| State | Meaning | Automations |
+|-------|---------|-------------|
+| `fresh` | No env, no volume, no host install evidence | `install.sh` may create env + empty volume |
+| `interrupted_first_install` | Env only; no volume; no marker/containers | Needs `CONFIRM_CREATE_EMPTY_DB=YES` to finish |
+| `existing` | Env + volume **proven** (compose volume label and/or marker) | `deploy.sh` with backup→migrate |
+| `volume_unproven` | Env + volume name exists, **no** project label and **no** marker | Stop; after `docker volume inspect`, only `CONFIRM_VOLUME_IS_ERP_DATA=YES` |
+| `ambiguous_volume_without_env` | Volume without env | Stop — restore env |
+| `lost_volume` | Volume missing **and** marker and/or erpbuket1 containers exist | **Hard stop** — `CONFIRM_CREATE_EMPTY_DB` cannot bypass |
+
+### Migration from an old ERP server (safe order)
+
+Do **not** start by running migrations against a new empty DB and hoping dumps
+appear later. Choose one strategy and stick to it.
+
+**Recommended:**
+
+1. On the **old** server: `./deploy/scripts/backup.sh` → copy `erpbuket1_*.dump` off-box.
+2. On HostFly: **fresh install** (`install.sh`) so env + labeled volume + schema exist.
+   - You may place dumps in `/var/backups/erpbuket1/` **before or after** install;
+     dumps alone do not block install.
+3. **Do not** treat this empty DB as production data yet.
+4. Restore dump into a **test** database first:
+   ```bash
+   TARGET_DB=flower_crm_restore_test CONFIRM_RESTORE=YES \
+     ./deploy/scripts/restore-postgres.sh /var/backups/erpbuket1/erpbuket1_....dump
+   ```
+5. Validate row counts / login against the test DB (manual SQL / app pointing is operator-owned).
+6. Production restore (destructive) only with dual confirmation — script takes a safety backup first:
+   ```bash
+   TARGET_DB=flower_crm CONFIRM_RESTORE=YES \
+   CONFIRM_PRODUCTION_RESTORE=YES I_UNDERSTAND_DESTRUCTIVE_RESTORE=YES \
+     ./deploy/scripts/restore-postgres.sh /var/backups/erpbuket1/erpbuket1_....dump
+   ```
+7. Then `./deploy/scripts/deploy.sh` so Prisma can **migrate forward** if the dump is older than the code.
+8. Bootstrap DIRECTOR only if the restored data has no usable admin.
+
+Never restore into shopbuket1’s PostgreSQL. ERP restore uses compose project `erpbuket1` only.
 
 ---
+
+## Disaster recovery (lost volume on this VPS)
+
+**Symptoms:** `install.marker` and/or `erpbuket1` compose containers exist, but
+Docker volume `erpbuket1_postgres_data` is gone. State: `lost_volume`.
+
+**Scripts refuse to create a new empty database.**
+`CONFIRM_CREATE_EMPTY_DB=YES` **cannot** bypass this.
+**Do not** run `install.sh` / `deploy.sh` as a recovery tool.
+
+### Manual procedure
+
+1. Stop automated install/deploy attempts. Run `./deploy/scripts/status.sh`.
+2. Search for recoverable data:
+   - `docker volume ls | grep erpbuket1`
+   - off-site / local `erpbuket1_*.dump`
+   - (advanced) Docker volume filesystem leftovers — only with full awareness
+3. If a **dump** exists and `production.env` is intact:
+   - Accept that anything not in the dump is lost.
+   - Manually create an empty ERP volume **without** pretending install “fixed” it:
+     ```bash
+     ERP_ENV_FILE=/etc/erpbuket1/production.env
+     docker compose --env-file "$ERP_ENV_FILE" -f docker-compose.prod.yml \
+       --project-name erpbuket1 up -d postgres
+     ```
+   - Wait for healthy postgres, then restore (test DB first, then production confirms).
+   - Run `./deploy/scripts/deploy.sh` only after restore to apply forward migrations if needed.
+   - Recreate marker via a successful deploy/health path (or re-run deploy after restore).
+4. If **no** dump and no volume backup: data is unrecoverable from ERP tooling.
+   Green-field reinstall is a **business decision**: remove install marker and ERP
+   containers only after explicit approval, then `fresh` install. Not scripted.
+5. Never: `down -v`, `volume prune`, `system prune`, or shop volume operations.
+
+`CONFIRM_CREATE_EMPTY_DB=YES` applies **only** to `interrupted_first_install`
+(env present, volume missing, **no** marker and **no** erpbuket1 containers).
+
+`CONFIRM_VOLUME_IS_ERP_DATA=YES` applies **only** to `volume_unproven` after you
+inspected `docker volume inspect erpbuket1_postgres_data` and confirmed labels/data.
+
+---
+
 
 ## Security checklist
 
-- Postgres: no host port; not on Internet
-- Web/API: bound to `127.0.0.1` only
-- Swagger: disabled when `NODE_ENV=production`
-- Cookies: `Secure` in production; HTTPS required
-- `WEB_URL` / OriginGuard / CORS: `https://erp.nasytko.ru`
-- `TRUST_PROXY=1` for one Nginx hop (client IP / audit / throttle)
-- Seed not auto-run
-- Migrations: `prisma migrate deploy` only (never `migrate dev` / `db push` in prod)
+- Secrets only in `/etc/erpbuket1/production.env` (600); never in Git
+- Scripts read env via `--env-file` / key getters — **no** `source`/`eval` of secrets
+- Postgres not published on host
+- API/Web on loopback only; public via Nginx TLS
+- `TRUST_PROXY=1`, Secure cookies in production
+- Backup dir 700 / dumps 600
+- Parallel ops serialized with flock (`/var/lock/erpbuket1-ops.lock`)
 
 ---
 
-## Coexistence with a future shop
+## Script index
 
-NewERP uses host ports `3000`/`3001` on loopback and Nginx server_name
-`erp.nasytko.ru` only. A shop can use other loopback ports and another
-`server_name` on the same Nginx without sharing NewERP containers or DB.
+| Script | Purpose |
+|--------|---------|
+| `deploy/scripts/install.sh` | First install / handoff to deploy |
+| `deploy/scripts/deploy.sh` | Update (backup → build → migrate → up) |
+| `deploy/scripts/healthcheck.sh` | `--mode=internal` \| `public` |
+| `deploy/scripts/status.sh` | Read-only status |
+| `deploy/scripts/backup.sh` | Backup entrypoint |
+| `deploy/scripts/backup-postgres.sh` | Backup implementation |
+| `deploy/scripts/restore-postgres.sh` | Confirmed restore |
+| `deploy/scripts/rollback.sh` | App image rollback via git worktree (no schema downgrade) |
+| `deploy/scripts/install-nginx.sh` | ERP Nginx vhost only |
+| `deploy/scripts/issue-cert.sh` | Let’s Encrypt webroot for ERP_DOMAIN |
+| `deploy/scripts/bootstrap-initial-users.sh` | First DIRECTOR |
+| `deploy/scripts/reset-user-password.sh` | Password reset (confirmed) |
+
+Legacy reference file `deploy/nginx/erp.nasytko.ru.conf` is **not** used by
+current HostFly scripts — use `erpbuket1.conf.template` /
+`erpbuket1.ssl.conf.template` via `install-nginx.sh`.
+
+---
+
+## Forbidden operations
+
+```bash
+# NEVER on production ERP:
+docker compose ... down -v
+docker volume rm erpbuket1_postgres_data
+docker volume prune
+docker system prune
+git reset --hard          # not used by ERP scripts
+certbot --nginx           # use issue-cert.sh webroot instead
+```
+
+Do not edit shopbuket1 project files from this repository’s runbooks.
