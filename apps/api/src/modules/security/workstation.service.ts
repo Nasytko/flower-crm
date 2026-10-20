@@ -79,7 +79,12 @@ export class WorkstationService {
   ): Promise<WorkSessionStatusDto> {
     const policy = await this.policy.get();
     if (!policy.pinEnabledOrg) {
-      throw new AppError('PIN_DISABLED', 'PIN-вход отключён в организации', {}, HttpStatus.CONFLICT);
+      throw new AppError(
+        'PIN_DISABLED',
+        'PIN-вход отключён в организации',
+        {},
+        HttpStatus.CONFLICT,
+      );
     }
     if (actor.authStrength !== AuthStrength.PASSWORD) {
       throw new AppError(
@@ -187,12 +192,7 @@ export class WorkstationService {
 
   async lock(actor: AuthenticatedUser, context: RequestContext): Promise<void> {
     if (!actor.workSessionId) {
-      throw new AppError(
-        'NO_WORK_SESSION',
-        'Нет активной рабочей сессии',
-        {},
-        HttpStatus.CONFLICT,
-      );
+      throw new AppError('NO_WORK_SESSION', 'Нет активной рабочей сессии', {}, HttpStatus.CONFLICT);
     }
     const lockedAt = new Date();
     await this.prisma.$transaction(async (tx) => {
@@ -314,11 +314,7 @@ export class WorkstationService {
         isActive: true,
         pinEnabled: true,
         pinHash: { not: null },
-        ...(onlyUserId
-          ? { id: onlyUserId }
-          : allowlist
-            ? { id: { in: allowlist } }
-            : {}),
+        ...(onlyUserId ? { id: onlyUserId } : allowlist ? { id: { in: allowlist } } : {}),
       },
       select: { id: true, name: true, role: true, pinLockedUntil: true },
       orderBy: { name: 'asc' },

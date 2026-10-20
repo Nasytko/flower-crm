@@ -1,9 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import {
-  AuditAction,
-  DeviceAccessMode,
-  type TrustedDeviceDto,
-} from '@erp/shared';
+import { AuditAction, DeviceAccessMode, type TrustedDeviceDto } from '@erp/shared';
 import type { Response } from 'express';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser, RequestContext } from '../../common/auth/auth.types';
@@ -51,7 +47,12 @@ export class TrustedDeviceService {
     this.assertElevated(actor);
     const name = input.name.trim();
     if (name.length < 2 || name.length > 100) {
-      throw new AppError('VALIDATION_ERROR', 'Укажите название устройства', {}, HttpStatus.BAD_REQUEST);
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Укажите название устройства',
+        {},
+        HttpStatus.BAD_REQUEST,
+      );
     }
     if (input.accessMode === DeviceAccessMode.SELECTED_USERS) {
       if (!input.allowedUserIds?.length) {
@@ -65,10 +66,7 @@ export class TrustedDeviceService {
     }
 
     const policy = await this.policy.get();
-    const days = Math.min(
-      90,
-      Math.max(1, input.trustDays ?? policy.deviceTrustDays),
-    );
+    const days = Math.min(90, Math.max(1, input.trustDays ?? policy.deviceTrustDays));
     const raw = generateOpaqueToken(32);
     const tokenHash = hashToken(raw);
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);

@@ -45,7 +45,11 @@ import {
   attrSelectionFromProduct,
   attrSelectionToRef,
 } from '@/components/ui/creatable-attr-select';
-import { ProductImageLightbox, ProductImageUploader, ProductThumb } from '@/components/ui/product-image';
+import {
+  ProductImageLightbox,
+  ProductImageUploader,
+  ProductThumb,
+} from '@/components/ui/product-image';
 import { StatRow } from '@/components/ui/stat-row';
 import { userFacingError } from '@/lib/api/error-messages';
 import { cn } from '@/lib/utils';
@@ -944,7 +948,8 @@ function ProductFormDialog({
             type: effectiveType,
             unit: Unit.PIECE,
             description: description.trim() || null,
-            purchasePrice: effectiveType === ProductType.SERVICE ? purchasePrice.trim() || null : null,
+            purchasePrice:
+              effectiveType === ProductType.SERVICE ? purchasePrice.trim() || null : null,
             salePrice: salePrice.trim() || null,
           };
           if (isFlower) {
@@ -1030,7 +1035,9 @@ function ProductFormDialog({
           <div className="space-y-4 rounded-[24px] border border-border/80 bg-muted/20 p-4">
             <p className="text-sm font-medium">Характеристики цветка</p>
             {kindWarning ? (
-              <p className="rounded-2xl bg-warn-soft px-3 py-2 text-sm text-warn-fg">{kindWarning}</p>
+              <p className="rounded-2xl bg-warn-soft px-3 py-2 text-sm text-warn-fg">
+                {kindWarning}
+              </p>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">

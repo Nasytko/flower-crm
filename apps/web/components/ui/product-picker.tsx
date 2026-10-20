@@ -37,8 +37,7 @@ export function ProductPicker({
 }): ReactElement {
   const reserved = useMemo(() => new Set(reservedIds ?? []), [reservedIds]);
   const selected = products.find((p) => p.id === value);
-  const primaryImage =
-    selected?.images?.find((i) => i.isPrimary) ?? selected?.images?.[0] ?? null;
+  const primaryImage = selected?.images?.find((i) => i.isPrimary) ?? selected?.images?.[0] ?? null;
 
   const options = useMemo<SelectOption[]>(() => {
     const sorted = [...products].sort((a, b) => {

@@ -62,9 +62,7 @@ export class ProductsService {
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
         where,
-        include: includePurchasePrice
-          ? productInclude
-          : { stock: true, ...productFlowerInclude },
+        include: includePurchasePrice ? productInclude : { stock: true, ...productFlowerInclude },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
@@ -91,9 +89,7 @@ export class ProductsService {
     const includePurchasePrice = this.canViewPurchasePrice(actor);
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: includePurchasePrice
-        ? productInclude
-        : { stock: true, ...productFlowerInclude },
+      include: includePurchasePrice ? productInclude : { stock: true, ...productFlowerInclude },
     });
     if (!product) {
       throw new AppError('PRODUCT_NOT_FOUND', 'Товар не найден', {}, HttpStatus.NOT_FOUND);
@@ -698,12 +694,7 @@ export class ProductsService {
     }
 
     if (varietyTouched) {
-      patch.varietyId = await resolveAttrRef(
-        tx,
-        ProductAttrKind.VARIETY,
-        dto.variety,
-        nextKindId,
-      );
+      patch.varietyId = await resolveAttrRef(tx, ProductAttrKind.VARIETY, dto.variety, nextKindId);
     } else if (kindTouched && current.varietyId) {
       const variety = await tx.productAttributeValue.findUnique({
         where: { id: current.varietyId },

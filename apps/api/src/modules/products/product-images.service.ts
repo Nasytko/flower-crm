@@ -1,10 +1,4 @@
-import {
-  HttpStatus,
-  Injectable,
-  Logger,
-  OnModuleInit,
-  StreamableFile,
-} from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, OnModuleInit, StreamableFile } from '@nestjs/common';
 import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -60,14 +54,17 @@ export class ProductImagesService implements OnModuleInit {
     return join(this.imagesDir(), `${id}.thumb.webp`);
   }
 
-  toDto(row: {
-    id: string;
-    mimeType: string;
-    byteSize: number;
-    width: number | null;
-    height: number | null;
-    sortOrder: number;
-  }, primaryImageId: string | null | undefined): ProductImageDto {
+  toDto(
+    row: {
+      id: string;
+      mimeType: string;
+      byteSize: number;
+      width: number | null;
+      height: number | null;
+      sortOrder: number;
+    },
+    primaryImageId: string | null | undefined,
+  ): ProductImageDto {
     return {
       id: row.id,
       mimeType: row.mimeType,
@@ -83,7 +80,12 @@ export class ProductImagesService implements OnModuleInit {
 
   async uploadStaged(file: Express.Multer.File | undefined): Promise<ProductImageDto> {
     if (!file || !file.buffer || file.buffer.length === 0) {
-      throw new AppError('VALIDATION_ERROR', 'Файл изображения обязателен', {}, HttpStatus.BAD_REQUEST);
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Файл изображения обязателен',
+        {},
+        HttpStatus.BAD_REQUEST,
+      );
     }
     if (file.size > MAX_BYTES || file.buffer.length > MAX_BYTES) {
       throw new AppError(
@@ -106,7 +108,12 @@ export class ProductImagesService implements OnModuleInit {
     let pipeline = sharp(file.buffer, { failOn: 'error', animated: false }).rotate();
     const meta = await pipeline.metadata();
     if (!meta.width || !meta.height) {
-      throw new AppError('VALIDATION_ERROR', 'Не удалось прочитать изображение', {}, HttpStatus.BAD_REQUEST);
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Не удалось прочитать изображение',
+        {},
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     // Re-decode via sharp to strip metadata / polyglots.
@@ -157,13 +164,23 @@ export class ProductImagesService implements OnModuleInit {
   async stream(id: string, variant: 'full' | 'thumb'): Promise<StreamableFile> {
     const row = await this.prisma.productImage.findUnique({ where: { id } });
     if (!row) {
-      throw new AppError('PRODUCT_IMAGE_NOT_FOUND', 'Изображение не найдено', {}, HttpStatus.NOT_FOUND);
+      throw new AppError(
+        'PRODUCT_IMAGE_NOT_FOUND',
+        'Изображение не найдено',
+        {},
+        HttpStatus.NOT_FOUND,
+      );
     }
     const path = variant === 'thumb' ? this.thumbPath(id) : this.fullPath(id);
     const fallback = this.fullPath(id);
     const filePath = existsSync(path) ? path : fallback;
     if (!existsSync(filePath)) {
-      throw new AppError('PRODUCT_IMAGE_NOT_FOUND', 'Файл изображения отсутствует', {}, HttpStatus.NOT_FOUND);
+      throw new AppError(
+        'PRODUCT_IMAGE_NOT_FOUND',
+        'Файл изображения отсутствует',
+        {},
+        HttpStatus.NOT_FOUND,
+      );
     }
     const info = await stat(filePath);
     return new StreamableFile(createReadStream(filePath), {
@@ -179,7 +196,12 @@ export class ProductImagesService implements OnModuleInit {
       include: { primaryFor: { select: { id: true } } },
     });
     if (!row) {
-      throw new AppError('PRODUCT_IMAGE_NOT_FOUND', 'Изображение не найдено', {}, HttpStatus.NOT_FOUND);
+      throw new AppError(
+        'PRODUCT_IMAGE_NOT_FOUND',
+        'Изображение не найдено',
+        {},
+        HttpStatus.NOT_FOUND,
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {

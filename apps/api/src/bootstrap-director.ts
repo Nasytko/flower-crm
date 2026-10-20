@@ -38,18 +38,12 @@ function optionalEmail(): string | null {
   return raw;
 }
 
-function validateCredentials(input: {
-  name: string;
-  login: string;
-  password: string;
-}): void {
+function validateCredentials(input: { name: string; login: string; password: string }): void {
   if (input.name.length < 2 || input.name.length > 120) {
     throw new Error('BOOTSTRAP_DIRECTOR_NAME must be 2–120 characters');
   }
   if (input.login.length < 2 || input.login.length > 64 || !LOGIN_PATTERN.test(input.login)) {
-    throw new Error(
-      'BOOTSTRAP_DIRECTOR_LOGIN must be 2–64 chars and match [a-zA-Z0-9._-]+',
-    );
+    throw new Error('BOOTSTRAP_DIRECTOR_LOGIN must be 2–64 chars and match [a-zA-Z0-9._-]+');
   }
   if (input.password.length < 10 || input.password.length > 128) {
     throw new Error('BOOTSTRAP_DIRECTOR_PASSWORD must be 10–128 characters');

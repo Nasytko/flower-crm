@@ -143,7 +143,12 @@ export function WorkstationLockScreen({
           >
             Разблокировать
           </Button>
-          <Button type="button" variant="outline" className="min-h-11 border-white/20 bg-transparent text-white hover:bg-white/10" onClick={onFullLogin}>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 border-white/20 bg-transparent text-white hover:bg-white/10"
+            onClick={onFullLogin}
+          >
             Полный вход по паролю
           </Button>
         </div>

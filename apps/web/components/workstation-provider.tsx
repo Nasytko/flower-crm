@@ -65,20 +65,23 @@ export function WorkstationProvider({ children }: { children: ReactNode }): Reac
     if (!status?.active || locked) return;
     if (idleTimer.current) clearTimeout(idleTimer.current);
     const minutes = status.idleLockMinutes || 5;
-    idleTimer.current = setTimeout(() => {
-      void (async () => {
-        if (!confirmLeaveUnsavedWork()) {
-          resetIdle();
-          return;
-        }
-        try {
-          await lockWorkstation();
-          setLocked(true);
-        } catch {
-          // ignore
-        }
-      })();
-    }, minutes * 60 * 1000);
+    idleTimer.current = setTimeout(
+      () => {
+        void (async () => {
+          if (!confirmLeaveUnsavedWork()) {
+            resetIdle();
+            return;
+          }
+          try {
+            await lockWorkstation();
+            setLocked(true);
+          } catch {
+            // ignore
+          }
+        })();
+      },
+      minutes * 60 * 1000,
+    );
   }, [status?.active, status?.idleLockMinutes, locked]);
 
   useEffect(() => {

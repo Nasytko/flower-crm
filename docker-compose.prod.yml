@@ -24,7 +24,6 @@
 #   CONFIRM_CERTBOT=YES ./deploy/scripts/issue-cert.sh
 # Nginx is NEVER modified by install/deploy alone.
 
-
 name: erpbuket1
 
 x-logging: &default-logging

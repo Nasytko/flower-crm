@@ -23,7 +23,13 @@ export async function createOrGetAttributeValue(
   kind: ProductAttrKind,
   rawName: string,
   parentId: string | null,
-): Promise<{ id: string; name: string; kind: ProductAttrKind; parentId: string | null; parentKey: string }> {
+): Promise<{
+  id: string;
+  name: string;
+  kind: ProductAttrKind;
+  parentId: string | null;
+  parentKey: string;
+}> {
   const name = displayNameFromRaw(rawName);
   if (name.length < 1 || name.length > 100) {
     throw new AppError(

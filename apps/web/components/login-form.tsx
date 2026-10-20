@@ -77,7 +77,9 @@ export function LoginForm(): ReactElement {
           ) : null}
         </div>
         {formError ? (
-          <p className="rounded-2xl bg-danger-soft px-3 py-2.5 text-sm text-danger-fg">{formError}</p>
+          <p className="rounded-2xl bg-danger-soft px-3 py-2.5 text-sm text-danger-fg">
+            {formError}
+          </p>
         ) : null}
         <Button
           className="mt-2 h-12 w-full rounded-2xl text-base font-semibold"

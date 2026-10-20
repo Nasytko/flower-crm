@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useState,
-  type ReactElement,
-  type MouseEvent,
-} from 'react';
+import { useCallback, useEffect, useState, type ReactElement, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { ProductImageDto } from '@erp/shared';
 import { fetchProductImageObjectUrl } from '@/lib/api/product-images';
@@ -59,8 +53,7 @@ export function ProductThumb({
   const [hover, setHover] = useState(false);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
-  const sizeClass =
-    size === 'sm' ? 'h-9 w-9' : size === 'lg' ? 'h-16 w-16' : 'h-12 w-12';
+  const sizeClass = size === 'sm' ? 'h-9 w-9' : size === 'lg' ? 'h-16 w-16' : 'h-12 w-12';
 
   const onMove = (event: MouseEvent) => {
     if (!enableHoverPreview || !fullUrl) return;
@@ -168,11 +161,7 @@ export function ProductImageLightbox({
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={url}
-            alt=""
-            className="max-h-[80vh] w-full object-contain"
-          />
+          <img src={url} alt="" className="max-h-[80vh] w-full object-contain" />
         ) : (
           <div className="flex h-64 w-80 items-center justify-center text-sm text-muted-foreground">
             Загрузка…

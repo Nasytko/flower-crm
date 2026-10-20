@@ -92,8 +92,7 @@ export function SecuritySettingsPanel(): ReactElement {
         trustCurrentDevice({
           name: deviceName,
           accessMode,
-          allowedUserIds:
-            accessMode === DeviceAccessMode.SELECTED_USERS ? selectedIds : undefined,
+          allowedUserIds: accessMode === DeviceAccessMode.SELECTED_USERS ? selectedIds : undefined,
         }),
       ),
     onSuccess: async () => {
@@ -106,7 +105,9 @@ export function SecuritySettingsPanel(): ReactElement {
 
   if (!can) {
     return (
-      <p className="text-sm text-muted-foreground">Недостаточно прав для управления безопасностью.</p>
+      <p className="text-sm text-muted-foreground">
+        Недостаточно прав для управления безопасностью.
+      </p>
     );
   }
 

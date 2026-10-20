@@ -123,14 +123,14 @@ export function SearchableSelect({
   const trimmedQuery = query.trim();
   const canCreate = Boolean(
     creatable &&
-      onCreate &&
-      trimmedQuery.length > 0 &&
-      !options.some(
-        (option) => option.label.trim().toLocaleLowerCase('ru-RU') === trimmedQuery.toLocaleLowerCase('ru-RU'),
-      ),
+    onCreate &&
+    trimmedQuery.length > 0 &&
+    !options.some(
+      (option) =>
+        option.label.trim().toLocaleLowerCase('ru-RU') === trimmedQuery.toLocaleLowerCase('ru-RU'),
+    ),
   );
-  const createRowLabel =
-    createLabel?.(trimmedQuery) ?? `+ Добавить «${trimmedQuery}»`;
+  const createRowLabel = createLabel?.(trimmedQuery) ?? `+ Добавить «${trimmedQuery}»`;
 
   const groups = useMemo(() => {
     const map = new Map<string | null, SelectOption[]>();
@@ -166,9 +166,7 @@ export function SearchableSelect({
     const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
     const heightBudget = openUp ? spaceAbove - 8 : spaceBelow - 8;
     const panelHeight = Math.min(maxHeight, Math.max(160, heightBudget));
-    const top = openUp
-      ? Math.max(viewportPad, rect.top - panelHeight - 8)
-      : rect.bottom + 8;
+    const top = openUp ? Math.max(viewportPad, rect.top - panelHeight - 8) : rect.bottom + 8;
     // Keep panel aligned to trigger when possible; clamp to viewport.
     let left = rect.left;
     if (left + width > window.innerWidth - viewportPad) {

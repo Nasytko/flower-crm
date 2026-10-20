@@ -8,7 +8,11 @@ import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
 import { hashPassword } from '../src/common/security/password';
 import { AppError } from '../src/common/errors/app-error';
-import { cancelLeftoverInventories, createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
+import {
+  cancelLeftoverInventories,
+  createTestSupplier,
+  deleteTestSuppliers,
+} from './helpers/live-db';
 
 describe('Phase 4 supplies + FIFO (live DB)', () => {
   const databaseUrl = process.env.DATABASE_URL;
@@ -22,7 +26,20 @@ describe('Phase 4 supplies + FIFO (live DB)', () => {
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
   const reservationAllocation = new ReservationAllocationService(audit);
-  const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, { syncProductImages: async () => undefined, toDto: (row: { id: string }) => ({ id: row.id, mimeType: "image/webp", byteSize: 0, width: null, height: null, sortOrder: 0, url: "", thumbUrl: "", isPrimary: false }) } as never);
+  const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, {
+    syncProductImages: async () => undefined,
+    toDto: (row: { id: string }) => ({
+      id: row.id,
+      mimeType: 'image/webp',
+      byteSize: 0,
+      width: null,
+      height: null,
+      sortOrder: 0,
+      url: '',
+      thumbUrl: '',
+      isPrimary: false,
+    }),
+  } as never);
   const supplies = new SuppliesService(
     prisma as never,
     audit,

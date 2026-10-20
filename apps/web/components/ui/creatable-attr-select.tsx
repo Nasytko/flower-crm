@@ -137,9 +137,7 @@ export function CreatableAttrSelect({
   );
 }
 
-export function attrSelectionToRef(
-  value: AttrSelection,
-): { id?: string; name?: string } | null {
+export function attrSelectionToRef(value: AttrSelection): { id?: string; name?: string } | null {
   if (!value) return null;
   if (value.mode === 'existing') return { id: value.id };
   return { name: value.name };

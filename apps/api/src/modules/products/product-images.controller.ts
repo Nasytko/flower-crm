@@ -47,10 +47,7 @@ export class ProductImagesController {
   @Get(':id')
   @RequirePermissions(Permission.PRODUCTS_VIEW)
   @ApiOperation({ summary: 'Stream product image (full or thumb)' })
-  stream(
-    @Param('id') id: string,
-    @Query('variant') variant?: string,
-  ) {
+  stream(@Param('id') id: string, @Query('variant') variant?: string) {
     const v = variant === 'thumb' ? 'thumb' : 'full';
     return this.images.stream(id, v);
   }

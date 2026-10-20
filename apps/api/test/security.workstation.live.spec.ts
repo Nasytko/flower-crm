@@ -35,12 +35,7 @@ describe('Workstation PIN security (live DB)', () => {
   const audit = new AuditService(prisma as never);
   const sessions = new SessionService(prisma as never, config as never);
   const policy = new SecurityPolicyService(prisma as never, audit);
-  const devices = new TrustedDeviceService(
-    prisma as never,
-    audit,
-    policy,
-    config as never,
-  );
+  const devices = new TrustedDeviceService(prisma as never, audit, policy, config as never);
   const workstation = new WorkstationService(prisma as never, audit, sessions, policy, devices);
 
   const suffix = Date.now().toString(36);
@@ -138,7 +133,9 @@ describe('Workstation PIN security (live DB)', () => {
       if (!ready) return;
       if (ids.device) {
         await prisma.session.deleteMany({
-          where: { OR: [{ userId: ids.director }, { userId: ids.florist }, { userId: ids.manager }] },
+          where: {
+            OR: [{ userId: ids.director }, { userId: ids.florist }, { userId: ids.manager }],
+          },
         });
         await prisma.workSession.deleteMany({ where: { deviceId: ids.device } });
         await prisma.trustedDevice.deleteMany({ where: { id: ids.device } });
@@ -314,12 +311,7 @@ describe('Workstation PIN security (live DB)', () => {
     const res = cookieResponse();
     const attempts = await Promise.allSettled(
       Array.from({ length: 5 }, () =>
-        workstation.unlockWithPin(
-          { userId: ids.florist, pin: '000000' },
-          deviceRaw,
-          {},
-          res,
-        ),
+        workstation.unlockWithPin({ userId: ids.florist, pin: '000000' }, deviceRaw, {}, res),
       ),
     );
     expect(attempts.every((a) => a.status === 'rejected')).toBe(true);

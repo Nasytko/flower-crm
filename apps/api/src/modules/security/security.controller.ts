@@ -24,7 +24,18 @@ import { RequirePermissions } from '../../common/auth/require-permissions.decora
 import { OriginGuard } from '../../common/auth/origin.guard';
 import type { AuthenticatedUser } from '../../common/auth/auth.types';
 import { REQUEST_ID_HEADER } from '../../common/http/request-id';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { SecurityPolicyService } from './security-policy.service';
@@ -169,10 +180,7 @@ export class SecurityController {
 
   @Post('auth/work-session/open')
   @Authenticated()
-  openWork(
-    @CurrentUser() actor: AuthenticatedUser,
-    @Req() request: Request,
-  ) {
+  openWork(@CurrentUser() actor: AuthenticatedUser, @Req() request: Request) {
     const token = request.cookies?.[DEVICE_COOKIE] as string | undefined;
     return this.workstation.openWorkSession(actor, token, this.contextFrom(request));
   }

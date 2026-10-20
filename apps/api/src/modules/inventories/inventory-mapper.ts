@@ -93,10 +93,7 @@ export function summarizeItems(items: InventoryItemSummaryRow[]): InventoryListS
 
 export function toInventoryListItem(
   row: SessionHeader,
-  summary: Pick<
-    InventoryListSummary,
-    'itemCount' | 'countedItemCount' | 'differenceItemCount'
-  >,
+  summary: Pick<InventoryListSummary, 'itemCount' | 'countedItemCount' | 'differenceItemCount'>,
 ): InventoryListItem {
   return {
     id: row.id,

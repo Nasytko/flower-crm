@@ -27,5 +27,7 @@ export function confirmLeaveUnsavedWork(): boolean {
   const warning = getUnsavedWorkWarning();
   if (!warning) return true;
   if (typeof window === 'undefined') return true;
-  return window.confirm(`${warning}\n\nПродолжить? Несохранённые данные не будут переданы другому сотруднику.`);
+  return window.confirm(
+    `${warning}\n\nПродолжить? Несохранённые данные не будут переданы другому сотруднику.`,
+  );
 }

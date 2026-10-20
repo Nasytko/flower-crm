@@ -3,16 +3,16 @@
 ERP/CRM for the flower shop, deployed **independently** alongside the existing
 internet shop `shopbuket1` on the same VPS.
 
-| Item | Value |
-|------|--------|
-| App path | `/opt/erpbuket1` |
-| Secrets | `/etc/erpbuket1/production.env` (chmod 600, **outside Git**) |
-| Backups | `/var/backups/erpbuket1` (chmod 700) |
-| State marker | `/var/lib/erpbuket1/install.marker` |
-| Compose project | `erpbuket1` |
-| Compose file | `docker-compose.prod.yml` |
-| Loopback ports | `127.0.0.1:3100` (web), `127.0.0.1:3101` (api) — configurable |
-| Public surface | Host Nginx `:80` / `:443` only |
+| Item            | Value                                                         |
+| --------------- | ------------------------------------------------------------- |
+| App path        | `/opt/erpbuket1`                                              |
+| Secrets         | `/etc/erpbuket1/production.env` (chmod 600, **outside Git**)  |
+| Backups         | `/var/backups/erpbuket1` (chmod 700)                          |
+| State marker    | `/var/lib/erpbuket1/install.marker`                           |
+| Compose project | `erpbuket1`                                                   |
+| Compose file    | `docker-compose.prod.yml`                                     |
+| Loopback ports  | `127.0.0.1:3100` (web), `127.0.0.1:3101` (api) — configurable |
+| Public surface  | Host Nginx `:80` / `:443` only                                |
 
 **Installing or updating ERP must never modify shopbuket1 containers, volumes,
 networks, or Nginx vhosts.**
@@ -41,14 +41,14 @@ Host Nginx :80/:443  (TLS for ERP_DOMAIN only)
 
 Isolation:
 
-| Resource | ERP | Shop (typical) |
-|----------|-----|----------------|
-| Compose project | `erpbuket1` | `shopbuket1` |
-| Volume | `erpbuket1_postgres_data` | shop-owned name |
-| Network | `erpbuket1_internal` | shop-owned |
-| Host ports | 3100/3101 loopback | other ports |
-| Nginx file | `/etc/nginx/sites-available/erpbuket1.conf` | shop vhost files |
-| Env | `/etc/erpbuket1/production.env` | shop env |
+| Resource        | ERP                                         | Shop (typical)   |
+| --------------- | ------------------------------------------- | ---------------- |
+| Compose project | `erpbuket1`                                 | `shopbuket1`     |
+| Volume          | `erpbuket1_postgres_data`                   | shop-owned name  |
+| Network         | `erpbuket1_internal`                        | shop-owned       |
+| Host ports      | 3100/3101 loopback                          | other ports      |
+| Nginx file      | `/etc/nginx/sites-available/erpbuket1.conf` | shop vhost files |
+| Env             | `/etc/erpbuket1/production.env`             | shop env         |
 
 PostgreSQL has **no host port**. API/Web bind **127.0.0.1 only**.
 
@@ -339,23 +339,23 @@ ERP_ENV_FILE=/etc/erpbuket1/production.env \
   docker compose --env-file "$ERP_ENV_FILE" -f docker-compose.prod.yml --project-name erpbuket1 logs -f api web
 ```
 
-| Stage / symptom | What to do |
-|-----------------|------------|
-| Git error (fetch/ff-only) | Fix network/auth or diverged commits; shop untouched; retry `./deploy.sh` |
-| Build error | Old api/web still running; fix code/deps; retry; no migrate yet if build failed before migrate |
-| Backup error | Deploy aborted before migrate; fix postgres/uploads; dumps kept |
-| Migration error | API/Web **not** switched to new migrate outcome mid-flight; **no auto DB restore**; inspect dump in `/var/backups/erpbuket1`; restore only with explicit `restore-postgres.sh` |
-| API/Web won't start | `compose logs api|web` (project `erpbuket1` only); volumes intact |
-| Health-check fail | Do not assume success; check logs; optional image rollback via `rollback.sh` **only if schema compatible** |
-| After migrate + bad app | Prefer **forward fix** release; image rollback does not downgrade Prisma schema |
+| Stage / symptom           | What to do                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Git error (fetch/ff-only) | Fix network/auth or diverged commits; shop untouched; retry `./deploy.sh`                                                                                                      |
+| Build error               | Old api/web still running; fix code/deps; retry; no migrate yet if build failed before migrate                                                                                 |
+| Backup error              | Deploy aborted before migrate; fix postgres/uploads; dumps kept                                                                                                                |
+| Migration error           | API/Web **not** switched to new migrate outcome mid-flight; **no auto DB restore**; inspect dump in `/var/backups/erpbuket1`; restore only with explicit `restore-postgres.sh` |
+| API/Web won't start       | `compose logs api                                                                                                                                                              | web`(project`erpbuket1` only); volumes intact |
+| Health-check fail         | Do not assume success; check logs; optional image rollback via `rollback.sh` **only if schema compatible**                                                                     |
+| After migrate + bad app   | Prefer **forward fix** release; image rollback does not downgrade Prisma schema                                                                                                |
 
-| Symptom | Likely cause |
-|---------|----------------|
-| Port in use | Another process / shop; change `ERP_*_PORT` or free port |
-| migrate fail | Fix SQL/migration; no auto DB rollback |
-| healthcheck fail | Inspect logs; do not assume success |
-| public HTTPS fail | DNS, Nginx, or cert missing |
-| cookie/login fail over HTTP | Production cookies are Secure — need HTTPS |
+| Symptom                     | Likely cause                                             |
+| --------------------------- | -------------------------------------------------------- |
+| Port in use                 | Another process / shop; change `ERP_*_PORT` or free port |
+| migrate fail                | Fix SQL/migration; no auto DB rollback                   |
+| healthcheck fail            | Inspect logs; do not assume success                      |
+| public HTTPS fail           | DNS, Nginx, or cert missing                              |
+| cookie/login fail over HTTP | Production cookies are Secure — need HTTPS               |
 
 ---
 
@@ -393,25 +393,25 @@ Do not edit shop vhost files from ERP docs/scripts.
 
 ## 20. Three different operations (do not mix)
 
-| Mode | Goal | Entry |
-|------|------|--------|
-| **Fresh install** | Empty new ERP on HostFly | `install.sh` with no prior marker/containers/volume |
+| Mode                       | Goal                           | Entry                                                    |
+| -------------------------- | ------------------------------ | -------------------------------------------------------- |
+| **Fresh install**          | Empty new ERP on HostFly       | `install.sh` with no prior marker/containers/volume      |
 | **Migration from old ERP** | Bring data from another server | Install empty stack **first**, then restore dump (below) |
-| **Disaster recovery** | Volume lost on **this** VPS | Manual recovery — **not** `install.sh` |
+| **Disaster recovery**      | Volume lost on **this** VPS    | Manual recovery — **not** `install.sh`                   |
 
 Dump files under `/var/backups/erpbuket1/` are **not** treated as proof that a
 volume was lost. Nginx ERP vhost alone is **not** proof that a DB existed.
 
 ### State machine (summary)
 
-| State | Meaning | Automations |
-|-------|---------|-------------|
-| `fresh` | No env, no volume, no host install evidence | `install.sh` may create env + empty volume |
-| `interrupted_first_install` | Env only; no volume; no marker/containers | Needs `CONFIRM_CREATE_EMPTY_DB=YES` to finish |
-| `existing` | Env + volume **proven** (compose volume label and/or marker) | `deploy.sh` with backup→migrate |
-| `volume_unproven` | Env + volume name exists, **no** project label and **no** marker | Stop; after `docker volume inspect`, only `CONFIRM_VOLUME_IS_ERP_DATA=YES` |
-| `ambiguous_volume_without_env` | Volume without env | Stop — restore env |
-| `lost_volume` | Volume missing **and** marker and/or erpbuket1 containers exist | **Hard stop** — `CONFIRM_CREATE_EMPTY_DB` cannot bypass |
+| State                          | Meaning                                                          | Automations                                                                |
+| ------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `fresh`                        | No env, no volume, no host install evidence                      | `install.sh` may create env + empty volume                                 |
+| `interrupted_first_install`    | Env only; no volume; no marker/containers                        | Needs `CONFIRM_CREATE_EMPTY_DB=YES` to finish                              |
+| `existing`                     | Env + volume **proven** (compose volume label and/or marker)     | `deploy.sh` with backup→migrate                                            |
+| `volume_unproven`              | Env + volume name exists, **no** project label and **no** marker | Stop; after `docker volume inspect`, only `CONFIRM_VOLUME_IS_ERP_DATA=YES` |
+| `ambiguous_volume_without_env` | Volume without env                                               | Stop — restore env                                                         |
+| `lost_volume`                  | Volume missing **and** marker and/or erpbuket1 containers exist  | **Hard stop** — `CONFIRM_CREATE_EMPTY_DB` cannot bypass                    |
 
 ### Migration from an old ERP server (safe order)
 
@@ -484,7 +484,6 @@ inspected `docker volume inspect erpbuket1_postgres_data` and confirmed labels/d
 
 ---
 
-
 ## Security checklist
 
 - Secrets only in `/etc/erpbuket1/production.env` (600); never in Git
@@ -499,20 +498,20 @@ inspected `docker volume inspect erpbuket1_postgres_data` and confirmed labels/d
 
 ## Script index
 
-| Script | Purpose |
-|--------|---------|
-| `deploy/scripts/install.sh` | First install / handoff to deploy |
-| `deploy/scripts/deploy.sh` | Update (backup → build → migrate → up) |
-| `deploy/scripts/healthcheck.sh` | `--mode=internal` \| `public` |
-| `deploy/scripts/status.sh` | Read-only status |
-| `deploy/scripts/backup.sh` | Backup entrypoint |
-| `deploy/scripts/backup-postgres.sh` | Backup implementation |
-| `deploy/scripts/restore-postgres.sh` | Confirmed restore |
-| `deploy/scripts/rollback.sh` | App image rollback via git worktree (no schema downgrade) |
-| `deploy/scripts/install-nginx.sh` | ERP Nginx vhost only |
-| `deploy/scripts/issue-cert.sh` | Let’s Encrypt webroot for ERP_DOMAIN |
-| `deploy/scripts/bootstrap-initial-users.sh` | First DIRECTOR |
-| `deploy/scripts/reset-user-password.sh` | Password reset (confirmed) |
+| Script                                      | Purpose                                                   |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `deploy/scripts/install.sh`                 | First install / handoff to deploy                         |
+| `deploy/scripts/deploy.sh`                  | Update (backup → build → migrate → up)                    |
+| `deploy/scripts/healthcheck.sh`             | `--mode=internal` \| `public`                             |
+| `deploy/scripts/status.sh`                  | Read-only status                                          |
+| `deploy/scripts/backup.sh`                  | Backup entrypoint                                         |
+| `deploy/scripts/backup-postgres.sh`         | Backup implementation                                     |
+| `deploy/scripts/restore-postgres.sh`        | Confirmed restore                                         |
+| `deploy/scripts/rollback.sh`                | App image rollback via git worktree (no schema downgrade) |
+| `deploy/scripts/install-nginx.sh`           | ERP Nginx vhost only                                      |
+| `deploy/scripts/issue-cert.sh`              | Let’s Encrypt webroot for ERP_DOMAIN                      |
+| `deploy/scripts/bootstrap-initial-users.sh` | First DIRECTOR                                            |
+| `deploy/scripts/reset-user-password.sh`     | Password reset (confirmed)                                |
 
 Legacy reference file `deploy/nginx/erp.nasytko.ru.conf` is **not** used by
 current HostFly scripts — use `erpbuket1.conf.template` /

@@ -1,8 +1,5 @@
 import { InventoryStatus } from '@erp/shared';
-import {
-  summarizeItems,
-  toInventoryListItem,
-} from './inventory-mapper';
+import { summarizeItems, toInventoryListItem } from './inventory-mapper';
 
 describe('inventory list contract (lean aggregates)', () => {
   it('summarizeItems matches list SQL FILTER semantics for counts', () => {

@@ -10,17 +10,7 @@ import { EmployeePinService } from './employee-pin.service';
 @Module({
   imports: [AuditModule, AuthModule],
   controllers: [SecurityController],
-  providers: [
-    SecurityPolicyService,
-    TrustedDeviceService,
-    WorkstationService,
-    EmployeePinService,
-  ],
-  exports: [
-    SecurityPolicyService,
-    TrustedDeviceService,
-    WorkstationService,
-    EmployeePinService,
-  ],
+  providers: [SecurityPolicyService, TrustedDeviceService, WorkstationService, EmployeePinService],
+  exports: [SecurityPolicyService, TrustedDeviceService, WorkstationService, EmployeePinService],
 })
 export class SecurityModule {}

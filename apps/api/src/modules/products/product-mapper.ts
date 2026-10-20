@@ -207,19 +207,17 @@ export function toPublicProduct(
         imagesService.toDto(img, product.primaryImageId ?? null),
       );
     } else if (product.images) {
-      base.images = product.images.map(
-        (img): ProductImageDto => ({
-          id: img.id,
-          mimeType: img.mimeType,
-          byteSize: img.byteSize,
-          width: img.width,
-          height: img.height,
-          sortOrder: img.sortOrder,
-          url: `/api/v1/product-images/${img.id}`,
-          thumbUrl: `/api/v1/product-images/${img.id}?variant=thumb`,
-          isPrimary: product.primaryImageId === img.id,
-        }),
-      );
+      base.images = product.images.map((img): ProductImageDto => ({
+        id: img.id,
+        mimeType: img.mimeType,
+        byteSize: img.byteSize,
+        width: img.width,
+        height: img.height,
+        sortOrder: img.sortOrder,
+        url: `/api/v1/product-images/${img.id}`,
+        thumbUrl: `/api/v1/product-images/${img.id}?variant=thumb`,
+        isPrimary: product.primaryImageId === img.id,
+      }));
     } else {
       base.images = [];
     }
