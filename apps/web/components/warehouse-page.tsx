@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Permission,
@@ -854,12 +854,8 @@ function ProductFormDialog({
     [flowerKind, flowerForm, variety, color, stemLengthCm],
   );
 
-  useEffect(() => {
-    if (!isFlower || nameTouched || isEdit) return;
-    if (suggestedName.length >= 2) {
-      setName(suggestedName);
-    }
-  }, [suggestedName, isFlower, nameTouched, isEdit]);
+  const resolvedName =
+    !nameTouched && isFlower && !isEdit && suggestedName.length >= 2 ? suggestedName : name;
 
   const onKindChange = (next: AttrSelection) => {
     const prevId =
@@ -929,7 +925,7 @@ function ProductFormDialog({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim().length < 2) {
+          if (resolvedName.trim().length < 2) {
             setLocalError('Укажите название');
             return;
           }
@@ -944,7 +940,7 @@ function ProductFormDialog({
           }
           setLocalError(null);
           const payload: ProductWriteInput & { type: ProductType; unit: Unit; name: string } = {
-            name: name.trim(),
+            name: resolvedName.trim(),
             type: effectiveType,
             unit: Unit.PIECE,
             description: description.trim() || null,
@@ -968,7 +964,7 @@ function ProductFormDialog({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label htmlFor="product-name">Название *</Label>
-            {isFlower && suggestedName.length >= 2 && name.trim() !== suggestedName ? (
+            {isFlower && suggestedName.length >= 2 && resolvedName.trim() !== suggestedName ? (
               <button
                 type="button"
                 className="text-xs font-medium text-primary underline-offset-2 hover:underline"
@@ -983,7 +979,7 @@ function ProductFormDialog({
           </div>
           <Input
             id="product-name"
-            value={name}
+            value={resolvedName}
             onChange={(e) => {
               setName(e.target.value);
               setNameTouched(true);

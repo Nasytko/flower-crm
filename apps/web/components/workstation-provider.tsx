@@ -40,6 +40,7 @@ export function WorkstationProvider({ children }: { children: ReactNode }): Reac
   const [status, setStatus] = useState<WorkSessionStatusDto | null>(null);
   const [locked, setLocked] = useState(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetIdleRef = useRef<() => void>(() => undefined);
 
   const refreshStatus = useCallback(async () => {
     if (!accessToken) {
@@ -58,8 +59,28 @@ export function WorkstationProvider({ children }: { children: ReactNode }): Reac
   }, [accessToken]);
 
   useEffect(() => {
-    void refreshStatus();
-  }, [refreshStatus, user?.id]);
+    let cancelled = false;
+    void (async () => {
+      if (!accessToken) {
+        if (!cancelled) setStatus(null);
+        return;
+      }
+      try {
+        const next = await getWorkstationStatus();
+        if (cancelled) return;
+        setStatus(next);
+        setLocked(next.locked);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiClientError && err.body.code === 'WORKSTATION_LOCKED') {
+          setLocked(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, user?.id]);
 
   const resetIdle = useCallback(() => {
     if (!status?.active || locked) return;
@@ -69,7 +90,7 @@ export function WorkstationProvider({ children }: { children: ReactNode }): Reac
       () => {
         void (async () => {
           if (!confirmLeaveUnsavedWork()) {
-            resetIdle();
+            resetIdleRef.current();
             return;
           }
           try {
@@ -82,7 +103,11 @@ export function WorkstationProvider({ children }: { children: ReactNode }): Reac
       },
       minutes * 60 * 1000,
     );
-  }, [status?.active, status?.idleLockMinutes, locked]);
+  }, [status, locked]);
+
+  useEffect(() => {
+    resetIdleRef.current = resetIdle;
+  }, [resetIdle]);
 
   useEffect(() => {
     if (!status?.active || locked) return;

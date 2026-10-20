@@ -8,20 +8,22 @@ import { cn } from '@/lib/utils';
 
 function useAuthImageUrl(apiPath: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!apiPath) {
-      setUrl(null);
-      return;
-    }
+    if (!apiPath) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     void (async () => {
       try {
         objectUrl = await fetchProductImageObjectUrl(apiPath);
-        if (!cancelled) setUrl(objectUrl);
+        if (cancelled) return;
+        setUrl(objectUrl);
+        setLoadedFor(apiPath);
       } catch {
-        if (!cancelled) setUrl(null);
+        if (cancelled) return;
+        setUrl(null);
+        setLoadedFor(apiPath);
       }
     })();
     return () => {
@@ -30,6 +32,8 @@ function useAuthImageUrl(apiPath: string | null | undefined): string | null {
     };
   }, [apiPath]);
 
+  if (!apiPath) return null;
+  if (loadedFor !== apiPath) return null;
   return url;
 }
 
@@ -126,14 +130,16 @@ export function ProductImageLightbox({
     0,
     images.findIndex((img) => img.id === initialId),
   );
-  const [index, setIndex] = useState(startIndex < 0 ? 0 : startIndex);
+  const safeStart = startIndex < 0 ? 0 : startIndex;
+  const [index, setIndex] = useState(safeStart);
+  const [syncKey, setSyncKey] = useState(`${open}:${safeStart}`);
+  const nextKey = `${open}:${safeStart}`;
+  if (nextKey !== syncKey) {
+    setSyncKey(nextKey);
+    setIndex(safeStart);
+  }
   const current = images[index] ?? null;
   const url = useAuthImageUrl(current?.url);
-
-  useEffect(() => {
-    if (!open) return;
-    setIndex(startIndex < 0 ? 0 : startIndex);
-  }, [open, startIndex]);
 
   useEffect(() => {
     if (!open) return;
