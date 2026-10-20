@@ -7,6 +7,8 @@ on:
 permissions:
   contents: read
 
+# No production deploy from CI — updates are applied on the VPS via ./deploy.sh only.
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -37,6 +39,8 @@ jobs:
       AUTH_LOGIN_MAX_ATTEMPTS: '20'
       AUTH_LOGIN_WINDOW_SECONDS: '60'
       NEXT_PUBLIC_API_URL: http://localhost:3001
+      BUSINESS_TIME_ZONE: Europe/Minsk
+      TRUST_PROXY: 'false'
 
     steps:
       - name: Checkout
@@ -55,7 +59,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Apply database migrations
+      - name: Validate Prisma schema
+        run: pnpm --filter @erp/database exec prisma validate
+
+      - name: Apply database migrations (isolated CI Postgres)
         run: pnpm db:migrate:deploy
 
       - name: Lint
@@ -64,8 +71,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
+      - name: Unit tests (no live DB required)
+        run: pnpm --filter @erp/api test:unit
+
+      - name: Live + concurrency tests (CI Postgres)
+        run: pnpm --filter @erp/api test:live
+
+      - name: Web unit tests
+        run: pnpm --filter @erp/web test
 
       - name: Build
         run: pnpm build
@@ -73,3 +86,12 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
+
+      - name: Shell syntax check (deploy scripts)
+        run: |
+          set -e
+          for f in deploy.sh install.sh deploy/scripts/*.sh deploy/scripts/lib/*.sh; do
+            [[ -f "$f" ]] || continue
+            bash -n "$f"
+            echo "OK $f"
+          done

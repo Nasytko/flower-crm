@@ -114,6 +114,38 @@ export class AuthService {
       return;
     }
 
+    const { hashToken } = await import('../../common/security/tokens');
+    const tokenHash = hashToken(refreshToken);
+    const session = await this.prisma.session.findFirst({
+      where: {
+        OR: [{ tokenHash }, { previousTokenHash: tokenHash }],
+        revokedAt: null,
+      },
+    });
+
+    if (session?.workSessionId) {
+      await this.prisma.workSession.updateMany({
+        where: { id: session.workSessionId, closedAt: null },
+        data: {
+          closedAt: new Date(),
+          closeReason: 'LOGOUT',
+          lockedAt: new Date(),
+        },
+      });
+      await this.prisma.session.updateMany({
+        where: { workSessionId: session.workSessionId, revokedAt: null },
+        data: { revokedAt: new Date(), lockedAt: new Date() },
+      });
+      await this.audit.log({
+        action: AuditAction.WORK_SESSION_CLOSED,
+        actorUserId: session.userId,
+        entityType: 'WorkSession',
+        entityId: session.workSessionId,
+        metadata: { reason: 'LOGOUT' },
+        context,
+      });
+    }
+
     const userId = await this.sessions.revokeByRefreshToken(refreshToken);
     if (userId) {
       await this.audit.log({
@@ -127,19 +159,54 @@ export class AuthService {
   }
 
   async logoutAll(actor: AuthenticatedUser, context: RequestContext): Promise<void> {
+    const bound = await this.prisma.session.findMany({
+      where: { userId: actor.id, revokedAt: null, workSessionId: { not: null } },
+      select: { workSessionId: true },
+    });
+    const workIds = [
+      ...new Set(bound.map((s) => s.workSessionId).filter((id): id is string => Boolean(id))),
+    ];
+    if (workIds.length) {
+      await this.prisma.workSession.updateMany({
+        where: { id: { in: workIds }, closedAt: null },
+        data: { closedAt: new Date(), closeReason: 'LOGOUT', lockedAt: new Date() },
+      });
+      await this.prisma.session.updateMany({
+        where: { workSessionId: { in: workIds }, revokedAt: null },
+        data: { revokedAt: new Date(), lockedAt: new Date() },
+      });
+    }
+
     const count = await this.sessions.revokeAllUserSessions(actor.id);
     await this.audit.log({
       action: AuditAction.LOGOUT_ALL,
       actorUserId: actor.id,
       entityType: 'User',
       entityId: actor.id,
-      metadata: { revokedSessions: count },
+      metadata: { revokedSessions: count, closedWorkSessions: workIds.length },
       context,
     });
   }
 
   async me(actor: AuthenticatedUser) {
-    return this.sessions.toAuthUser(actor);
+    return this.sessions.toAuthUser(actor, {
+      authStrength: actor.authStrength,
+      elevated: actor.elevatedUntil != null && actor.elevatedUntil.getTime() > Date.now(),
+      workSessionActive: Boolean(actor.workSessionId),
+      workstationLocked: Boolean(actor.lockedAt),
+    });
+  }
+
+  async stepUp(actor: AuthenticatedUser, password: string, context: RequestContext) {
+    const result = await this.sessions.elevateWithPassword(actor, password);
+    await this.audit.log({
+      action: AuditAction.STEP_UP_VERIFIED,
+      actorUserId: actor.id,
+      entityType: 'Session',
+      entityId: actor.sessionId,
+      context,
+    });
+    return result;
   }
 
   async changePassword(

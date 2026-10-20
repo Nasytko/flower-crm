@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { CookieOptions, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { AuthUser, getPermissionsForRole, Role } from '@erp/shared';
+import { AuthStrength, AuthUser, getPermissionsForRole, Role } from '@erp/shared';
+import { Prisma } from '@erp/database';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { generateOpaqueToken, hashToken } from '../../common/security/tokens';
@@ -14,7 +15,14 @@ export interface AccessTokenPayload {
   login: string;
 }
 
+export type CreateSessionOptions = {
+  authStrength?: AuthStrength;
+  workSessionId?: string | null;
+  elevatedUntil?: Date | null;
+};
+
 const JWT_ALGORITHM = 'HS256' as const;
+const PASSWORD_ELEVATION_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class SessionService {
@@ -26,12 +34,41 @@ export class SessionService {
   async createSession(
     user: { id: string; name: string; login: string; email?: string | null; role: Role },
     context: RequestContext,
-  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; user: AuthUser }> {
+    options: CreateSessionOptions = {},
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+    user: AuthUser;
+    sessionId: string;
+  }> {
+    return this.createSessionInTx(this.prisma, user, context, options);
+  }
+
+  async createSessionInTx(
+    tx: Prisma.TransactionClient | PrismaService,
+    user: { id: string; name: string; login: string; email?: string | null; role: Role },
+    context: RequestContext,
+    options: CreateSessionOptions = {},
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+    user: AuthUser;
+    sessionId: string;
+  }> {
     const refreshToken = generateOpaqueToken();
     const tokenHash = hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + this.config.sessionTtlSeconds * 1000);
+    const authStrength = options.authStrength ?? AuthStrength.PASSWORD;
+    const elevatedUntil =
+      options.elevatedUntil !== undefined
+        ? options.elevatedUntil
+        : authStrength === AuthStrength.PASSWORD
+          ? new Date(Date.now() + PASSWORD_ELEVATION_TTL_MS)
+          : null;
 
-    const session = await this.prisma.session.create({
+    const session = await tx.session.create({
       data: {
         userId: user.id,
         tokenHash,
@@ -39,6 +76,11 @@ export class SessionService {
         userAgent: context.userAgent ?? null,
         expiresAt,
         lastUsedAt: new Date(),
+        lastUserActivityAt: new Date(),
+        authStrength,
+        elevatedUntil,
+        workSessionId: options.workSessionId ?? null,
+        lockedAt: null,
       },
     });
 
@@ -53,7 +95,13 @@ export class SessionService {
       accessToken,
       refreshToken,
       expiresIn: this.config.jwtAccessTtlSeconds,
-      user: this.toAuthUser(user),
+      user: this.toAuthUser(user, {
+        authStrength,
+        elevated: elevatedUntil != null && elevatedUntil.getTime() > Date.now(),
+        workSessionActive: Boolean(options.workSessionId),
+        workstationLocked: false,
+      }),
+      sessionId: session.id,
     };
   }
 
@@ -77,7 +125,7 @@ export class SessionService {
 
     const session = await this.prisma.session.findUnique({
       where: { tokenHash },
-      include: { user: true },
+      include: { user: true, workSession: true },
     });
 
     if (session) {
@@ -85,9 +133,19 @@ export class SessionService {
         return null;
       }
 
+      // Locked sessions may still refresh so AllowLocked endpoints keep working
+      // after access JWT expiry; AuthGuard continues to enforce WORKSTATION_LOCKED.
+
       if (!session.user.isActive) {
         await this.revokeSessionById(session.id);
         return null;
+      }
+
+      if (session.workSessionId && session.workSession) {
+        const work = session.workSession;
+        if (work.closedAt || work.expiresAt.getTime() <= now.getTime()) {
+          return null;
+        }
       }
 
       const nextRefreshToken = generateOpaqueToken();
@@ -122,17 +180,27 @@ export class SessionService {
         login: session.user.login,
       });
 
+      const authStrength = (session.authStrength as AuthStrength) ?? AuthStrength.PASSWORD;
       return {
         accessToken,
         refreshToken: nextRefreshToken,
         expiresIn: this.config.jwtAccessTtlSeconds,
-        user: this.toAuthUser({
-          id: session.user.id,
-          name: session.user.name,
-          login: session.user.login,
-          email: session.user.email,
-          role: session.user.role as Role,
-        }),
+        user: this.toAuthUser(
+          {
+            id: session.user.id,
+            name: session.user.name,
+            login: session.user.login,
+            email: session.user.email,
+            role: session.user.role as Role,
+          },
+          {
+            authStrength,
+            elevated:
+              session.elevatedUntil != null && session.elevatedUntil.getTime() > now.getTime(),
+            workSessionActive: Boolean(session.workSessionId),
+            workstationLocked: Boolean(session.lockedAt),
+          },
+        ),
       };
     }
 
@@ -208,7 +276,10 @@ export class SessionService {
 
       const [user, session] = await Promise.all([
         this.prisma.user.findUnique({ where: { id: payload.sub } }),
-        this.prisma.session.findUnique({ where: { id: payload.sid } }),
+        this.prisma.session.findUnique({
+          where: { id: payload.sid },
+          include: { workSession: true },
+        }),
       ]);
 
       if (!user || !user.isActive) {
@@ -223,6 +294,14 @@ export class SessionService {
         return null;
       }
 
+      // Work session absolute expiry closes PIN context and invalidates session for API.
+      if (session.workSessionId && session.workSession) {
+        const work = session.workSession;
+        if (work.closedAt || work.expiresAt.getTime() <= Date.now()) {
+          return null;
+        }
+      }
+
       return {
         id: user.id,
         name: user.name,
@@ -231,10 +310,35 @@ export class SessionService {
         role: user.role as Role,
         sessionId: session.id,
         isActive: user.isActive,
+        authStrength: (session.authStrength as AuthStrength) ?? AuthStrength.PASSWORD,
+        elevatedUntil: session.elevatedUntil,
+        workSessionId: session.workSessionId,
+        lockedAt: session.lockedAt,
       };
     } catch {
       return null;
     }
+  }
+
+  async elevateWithPassword(
+    actor: AuthenticatedUser,
+    password: string,
+  ): Promise<{ elevatedUntil: string }> {
+    const { verifyPassword } = await import('../../common/security/password');
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: actor.id } });
+    const ok = await verifyPassword(user.passwordHash, password);
+    if (!ok) {
+      const { AppError } = await import('../../common/errors/app-error');
+      const { HttpStatus } = await import('@nestjs/common');
+      throw new AppError('INVALID_CREDENTIALS', 'Неверный пароль', {}, HttpStatus.UNAUTHORIZED);
+    }
+    // Verify password for step-up only — do not permanently upgrade PIN → PASSWORD.
+    const elevatedUntil = new Date(Date.now() + PASSWORD_ELEVATION_TTL_MS);
+    await this.prisma.session.update({
+      where: { id: actor.sessionId },
+      data: { elevatedUntil },
+    });
+    return { elevatedUntil: elevatedUntil.toISOString() };
   }
 
   setRefreshCookie(response: Response, refreshToken: string): void {
@@ -245,13 +349,18 @@ export class SessionService {
     response.clearCookie(this.config.authCookieName, this.cookieOptions());
   }
 
-  toAuthUser(user: {
-    id: string;
-    name: string;
-    login: string;
-    email?: string | null;
-    role: Role;
-  }): AuthUser {
+  toAuthUser(
+    user: {
+      id: string;
+      name: string;
+      login: string;
+      email?: string | null;
+      role: Role;
+    },
+    extras?: Partial<
+      Pick<AuthUser, 'authStrength' | 'elevated' | 'workSessionActive' | 'workstationLocked'>
+    >,
+  ): AuthUser {
     return {
       id: user.id,
       name: user.name,
@@ -259,6 +368,7 @@ export class SessionService {
       email: user.email ?? null,
       role: user.role,
       permissions: [...getPermissionsForRole(user.role)],
+      ...extras,
     };
   }
 

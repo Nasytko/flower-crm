@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactElement, type ReactNode } from 'react';
 import { AuthProvider } from '@/lib/auth/auth-context';
+import { WorkstationProvider } from '@/components/workstation-provider';
 import { ApiClientError } from '@/lib/api/client';
 
 export function Providers({ children }: { children: ReactNode }): ReactElement {
@@ -30,7 +31,9 @@ export function Providers({ children }: { children: ReactNode }): ReactElement {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider queryClient={queryClient}>{children}</AuthProvider>
+      <AuthProvider queryClient={queryClient}>
+        <WorkstationProvider>{children}</WorkstationProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

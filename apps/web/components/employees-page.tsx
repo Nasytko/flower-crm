@@ -20,6 +20,13 @@ import {
   resetEmployeePassword,
   updateEmployee,
 } from '@/lib/api/employees';
+import {
+  disableEmployeePin,
+  enableEmployeePin,
+  generateEmployeePin,
+  revokeEmployeePinSessions,
+  stepUpPassword,
+} from '@/lib/api/security';
 import { queryKeys } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +36,22 @@ import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { StatRow } from '@/components/ui/stat-row';
 import { userFacingError } from '@/lib/api/error-messages';
+import { ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
+
+async function withStepUp<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof ApiClientError && err.body.code === 'STEP_UP_REQUIRED') {
+      const password = window.prompt('Подтвердите пароль директора');
+      if (!password) throw err;
+      await stepUpPassword(password);
+      return await run();
+    }
+    throw err;
+  }
+}
 
 const createSchema = z
   .object({
@@ -577,8 +599,106 @@ function EditEmployeeDialog({
           />
           Активен
         </label>
+
+        <EmployeePinBlock employee={employee} />
       </div>
     </ResponsiveDialog>
+  );
+}
+
+function EmployeePinBlock({ employee }: { employee: EmployeeListItem }): ReactElement {
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission(Permission.EMPLOYEES_MANAGE);
+  const queryClient = useQueryClient();
+  const [plainPin, setPlainPin] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!canManage) return <></>;
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border bg-muted/20 p-4">
+      <p className="text-sm font-medium">Безопасность → Быстрый вход по PIN</p>
+      <p className="text-xs text-muted-foreground">
+        Статус: {employee.pinStatus ?? '—'}
+        {employee.pinUpdatedAt
+          ? ` · обновлён ${new Date(employee.pinUpdatedAt).toLocaleString('ru-RU')}`
+          : ''}
+      </p>
+      {plainPin ? (
+        <p className="rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn-fg">
+          Новый PIN (показывается один раз): <strong className="tracking-widest">{plainPin}</strong>
+        </p>
+      ) : null}
+      {msg ? <p className="text-xs text-success-fg">{msg}</p> : null}
+      {err ? <p className="text-xs text-danger-fg">{err}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void withStepUp(() => enableEmployeePin(employee.id))
+              .then(async () => {
+                setMsg('PIN включён');
+                setErr(null);
+                await queryClient.invalidateQueries({ queryKey: queryKeys.employees });
+              })
+              .catch((e) => setErr(userFacingError(e, 'Ошибка')))
+          }
+        >
+          Включить
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void withStepUp(() => disableEmployeePin(employee.id))
+              .then(async () => {
+                setMsg('PIN выключен');
+                setPlainPin(null);
+                setErr(null);
+                await queryClient.invalidateQueries({ queryKey: queryKeys.employees });
+              })
+              .catch((e) => setErr(userFacingError(e, 'Ошибка')))
+          }
+        >
+          Выключить
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() =>
+            void withStepUp(() => generateEmployeePin(employee.id))
+              .then(async (res) => {
+                setPlainPin(res.pinPlaintext);
+                setMsg('PIN сгенерирован');
+                setErr(null);
+                await queryClient.invalidateQueries({ queryKey: queryKeys.employees });
+              })
+              .catch((e) => setErr(userFacingError(e, 'Ошибка')))
+          }
+        >
+          Сгенерировать PIN
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void withStepUp(() => revokeEmployeePinSessions(employee.id))
+              .then((res) => {
+                setMsg(`Завершено сессий: ${res.revoked}`);
+                setErr(null);
+              })
+              .catch((e) => setErr(userFacingError(e, 'Ошибка')))
+          }
+        >
+          Завершить быстрые сессии
+        </Button>
+      </div>
+    </div>
   );
 }
 

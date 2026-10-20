@@ -16,6 +16,29 @@ export enum Role {
 
 export const ROLES = [Role.FLORIST, Role.MANAGER, Role.DIRECTOR] as const;
 
+export enum AuthStrength {
+  PASSWORD = 'PASSWORD',
+  PIN = 'PIN',
+}
+
+export enum DeviceAccessMode {
+  ALL_PIN_USERS = 'ALL_PIN_USERS',
+  SELECTED_USERS = 'SELECTED_USERS',
+}
+
+export enum WorkSessionCloseReason {
+  MANUAL = 'MANUAL',
+  LOGOUT = 'LOGOUT',
+  EXPIRED = 'EXPIRED',
+  DEVICE_REVOKED = 'DEVICE_REVOKED',
+  FORCE = 'FORCE',
+}
+
+export type PinStatus = 'DISABLED' | 'NOT_SET' | 'ACTIVE' | 'TEMP_LOCKED';
+
+/** Fixed PIN length (leading zeros preserved as string). */
+export const PIN_LENGTH = 6;
+
 export enum Permission {
   EMPLOYEES_VIEW = 'employees.view',
   EMPLOYEES_MANAGE = 'employees.manage',
@@ -53,6 +76,9 @@ export enum Permission {
   AUDIT_VIEW = 'audit.view',
 
   SETTINGS_MANAGE = 'settings.manage',
+
+  /** Org security policy + trusted devices (director). */
+  SECURITY_POLICY_MANAGE = 'security.policy.manage',
 }
 
 export const ALL_PERMISSIONS = Object.values(Permission);
@@ -110,6 +136,11 @@ export interface AuthUser {
   email: string | null;
   role: Role;
   permissions: Permission[];
+  authStrength?: AuthStrength;
+  /** True when step-up password elevation is still valid. */
+  elevated?: boolean;
+  workSessionActive?: boolean;
+  workstationLocked?: boolean;
 }
 
 export interface EmployeeListItem {
@@ -125,6 +156,10 @@ export interface EmployeeListItem {
   /** True when at least one non-revoked, non-expired session exists. */
   hasActiveSession: boolean;
   activeSessionCount: number;
+  pinEnabled?: boolean;
+  pinStatus?: PinStatus;
+  pinUpdatedAt?: string | null;
+  pinLockedUntil?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,6 +189,9 @@ export interface LoginResponse {
   accessToken: string;
   expiresIn: number;
   user: AuthUser;
+  /** Plaintext PIN returned only once on generate/reset. */
+  pinPlaintext?: string;
+  workSession?: WorkSessionStatusDto;
 }
 
 export interface ApiErrorBody {
@@ -205,6 +243,103 @@ export enum AuditAction {
   ORDER_STATUS_CHANGED = 'ORDER_STATUS_CHANGED',
   ORDER_CANCELLED = 'ORDER_CANCELLED',
   STOCK_RESERVATIONS_ALLOCATED = 'STOCK_RESERVATIONS_ALLOCATED',
+
+  PIN_ENABLED = 'PIN_ENABLED',
+  PIN_DISABLED = 'PIN_DISABLED',
+  PIN_GENERATED = 'PIN_GENERATED',
+  PIN_RESET = 'PIN_RESET',
+  PIN_UNLOCK_SUCCESS = 'PIN_UNLOCK_SUCCESS',
+  PIN_UNLOCK_FAILED = 'PIN_UNLOCK_FAILED',
+  PIN_SESSIONS_REVOKED = 'PIN_SESSIONS_REVOKED',
+
+  DEVICE_TRUSTED = 'DEVICE_TRUSTED',
+  DEVICE_REVOKED = 'DEVICE_REVOKED',
+  DEVICE_UPDATED = 'DEVICE_UPDATED',
+  DEVICE_EXTENDED = 'DEVICE_EXTENDED',
+  DEVICE_FORCE_LOCKED = 'DEVICE_FORCE_LOCKED',
+
+  WORK_SESSION_OPENED = 'WORK_SESSION_OPENED',
+  WORK_SESSION_CLOSED = 'WORK_SESSION_CLOSED',
+  WORKSTATION_LOCKED = 'WORKSTATION_LOCKED',
+  WORKSTATION_UNLOCKED = 'WORKSTATION_UNLOCKED',
+  EMPLOYEE_SWITCHED = 'EMPLOYEE_SWITCHED',
+
+  SECURITY_POLICY_UPDATED = 'SECURITY_POLICY_UPDATED',
+  STEP_UP_VERIFIED = 'STEP_UP_VERIFIED',
+}
+
+export const SECURITY_POLICY_DEFAULTS = {
+  pinEnabledOrg: true,
+  deviceTrustDays: 30,
+  workSessionMaxHours: 12,
+  idleLockMinutes: 5,
+  pinMaxAttempts: 5,
+  pinLockoutMinutes: 15,
+  allowEmployeeSwitch: true,
+  requirePasswordForWorkSession: true,
+  pinLength: PIN_LENGTH,
+} as const;
+
+export const SECURITY_POLICY_LIMITS = {
+  deviceTrustDays: { min: 1, max: 90 },
+  workSessionMaxHours: { min: 1, max: 24 },
+  idleLockMinutes: { min: 1, max: 60 },
+  pinMaxAttempts: { min: 3, max: 10 },
+  pinLockoutMinutes: { min: 5, max: 60 },
+} as const;
+
+export interface SecurityPolicyDto {
+  pinEnabledOrg: boolean;
+  deviceTrustDays: number;
+  workSessionMaxHours: number;
+  idleLockMinutes: number;
+  pinMaxAttempts: number;
+  pinLockoutMinutes: number;
+  allowEmployeeSwitch: boolean;
+  requirePasswordForWorkSession: boolean;
+  pinLength: number;
+  updatedAt: string;
+}
+
+export interface TrustedDeviceDto {
+  id: string;
+  name: string;
+  accessMode: DeviceAccessMode;
+  allowedUserIds: string[];
+  createdByUserId: string;
+  createdByName: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastSeenAt: string | null;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+  createdAt: string;
+  isCurrentDevice?: boolean;
+}
+
+export interface WorkSessionStatusDto {
+  active: boolean;
+  workSessionId: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  expiresAt: string | null;
+  locked: boolean;
+  idleLockMinutes: number;
+  allowEmployeeSwitch: boolean;
+  authStrength: AuthStrength | null;
+  elevated: boolean;
+}
+
+export interface PinCandidateDto {
+  id: string;
+  name: string;
+  role: Role;
+}
+
+export interface EmployeePinStatusDto {
+  pinEnabled: boolean;
+  pinStatus: PinStatus;
+  pinUpdatedAt: string | null;
+  pinLockedUntil: string | null;
 }
 
 export const ROLE_LABELS_RU: Record<Role, string> = {

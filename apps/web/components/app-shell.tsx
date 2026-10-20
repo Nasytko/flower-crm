@@ -6,8 +6,10 @@ import { useEffect, useId, useState, type ReactElement, type ReactNode } from 'r
 import { Menu, X } from 'lucide-react';
 import { Permission, ROLE_LABELS_RU } from '@erp/shared';
 import { useAuth } from '@/lib/auth/auth-context';
+import { useWorkstation } from '@/components/workstation-provider';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { userFacingError } from '@/lib/api/error-messages';
 
 type NavItem = { href: string; label: string; icon: string };
 
@@ -22,10 +24,12 @@ function sectionTitle(pathname: string, items: NavItem[]): string {
 
 export function AppShell({ children }: { children: ReactNode }): ReactElement {
   const { user, bootstrapped, logout, hasPermission } = useAuth();
+  const { status, lock, openWork } = useWorkstation();
   const router = useRouter();
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPathname, setDrawerPathname] = useState(pathname);
+  const [wsMessage, setWsMessage] = useState<string | null>(null);
   const drawerTitleId = useId();
 
   // Close drawer when the route changes (back/forward or programmatic nav).
@@ -127,15 +131,46 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
           <p className="truncate text-xs text-sidebar-muted">{ROLE_LABELS_RU[user.role]}</p>
         </div>
       </div>
-      <Button
-        variant="soft"
-        className="h-11 w-full rounded-xl bg-white/8 text-sidebar-foreground hover:bg-white/12"
-        onClick={() => {
-          void logout().then(() => router.replace('/login'));
-        }}
-      >
-        Выйти
-      </Button>
+      <div className="space-y-2">
+        {status && !status.active ? (
+          <Button
+            variant="soft"
+            className="h-10 w-full rounded-xl bg-white/8 text-xs text-sidebar-foreground hover:bg-white/12"
+            onClick={() => {
+              void openWork()
+                .then(() => setWsMessage('Рабочая сессия открыта'))
+                .catch((err) => setWsMessage(userFacingError(err, 'Не удалось открыть сессию')));
+            }}
+          >
+            Открыть рабочую сессию
+          </Button>
+        ) : null}
+        {status?.active ? (
+          <>
+            <Button
+              variant="soft"
+              className="h-10 w-full rounded-xl bg-white/8 text-xs text-sidebar-foreground hover:bg-white/12"
+              onClick={() => {
+                void lock().catch((err) =>
+                  setWsMessage(userFacingError(err, 'Не удалось заблокировать')),
+                );
+              }}
+            >
+              Заблокировать / сменить
+            </Button>
+          </>
+        ) : null}
+        <Button
+          variant="soft"
+          className="h-11 w-full rounded-xl bg-white/8 text-sidebar-foreground hover:bg-white/12"
+          onClick={() => {
+            void logout().then(() => router.replace('/login'));
+          }}
+        >
+          Выйти
+        </Button>
+        {wsMessage ? <p className="text-[11px] text-sidebar-muted">{wsMessage}</p> : null}
+      </div>
     </div>
   );
 

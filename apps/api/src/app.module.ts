@@ -24,6 +24,7 @@ import { WarehouseModule } from './modules/warehouse/warehouse.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { AddressModule } from './modules/address/address.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { SecurityModule } from './modules/security/security.module';
 
 @Module({
   imports: [
@@ -53,6 +54,17 @@ import { SettingsModule } from './modules/settings/settings.module';
                 .switchToHttp()
                 .getRequest<{ method?: string; path?: string }>();
               return !(request.method === 'POST' && request.path === '/api/v1/auth/login');
+            },
+          },
+          {
+            name: 'pin',
+            ttl: config.authLoginWindowSeconds * 1000,
+            limit: config.authLoginMaxAttempts,
+            skipIf: (context) => {
+              const request = context
+                .switchToHttp()
+                .getRequest<{ method?: string; path?: string }>();
+              return !(request.method === 'POST' && request.path === '/api/v1/auth/pin/unlock');
             },
           },
         ],
@@ -140,6 +152,7 @@ import { SettingsModule } from './modules/settings/settings.module';
     OrdersModule,
     AddressModule,
     SettingsModule,
+    SecurityModule,
     AuditModule,
     HealthModule,
   ],

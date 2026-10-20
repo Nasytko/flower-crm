@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Permission } from '@erp/shared';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -8,16 +8,21 @@ import { getSystemSettings } from '@/lib/api/settings';
 import { queryKeys } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
+import { SecuritySettingsPanel } from '@/components/security-settings-panel';
 import { cn } from '@/lib/utils';
+
+type SettingsTab = 'system' | 'security';
 
 export function SettingsPage(): ReactElement {
   const { hasPermission } = useAuth();
   const canManage = hasPermission(Permission.SETTINGS_MANAGE);
+  const canSecurity = hasPermission(Permission.SECURITY_POLICY_MANAGE);
+  const [tab, setTab] = useState<SettingsTab>(canSecurity ? 'security' : 'system');
 
   const query = useQuery({
     queryKey: queryKeys.systemSettings,
     queryFn: getSystemSettings,
-    enabled: canManage,
+    enabled: canManage && tab === 'system',
     refetchInterval: 30_000,
   });
 
@@ -32,46 +37,67 @@ export function SettingsPage(): ReactElement {
   const data = query.data;
 
   return (
-    <div className="min-w-0 max-w-2xl space-y-4">
+    <div className="min-w-0 max-w-3xl space-y-4">
       <PageHeader
-        title="Настройки системы"
-        description="Статус окружения и рабочие параметры"
+        title="Настройки"
+        description="Система и безопасность рабочего места"
         actions={
-          <Button type="button" variant="outline" onClick={() => void query.refetch()}>
-            Обновить
-          </Button>
+          tab === 'system' ? (
+            <Button type="button" variant="outline" onClick={() => void query.refetch()}>
+              Обновить
+            </Button>
+          ) : null
         }
       />
 
-      {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">Загрузка...</p>
-      ) : query.isError || !data ? (
-        <p className="text-sm text-danger-fg">Не удалось получить статус системы</p>
-      ) : (
-        <section className="space-y-3 rounded-[28px] border border-border bg-card p-5 sm:p-6">
-          <StatusRow
-            label="API"
-            value={data.health.status === 'ok' ? 'Работает' : 'Сбои'}
-            ok={data.health.status === 'ok'}
-          />
-          <StatusRow
-            label="База данных"
-            value={data.health.database === 'up' ? 'Доступна' : 'Недоступна'}
-            ok={data.health.database === 'up'}
-          />
-          <StatusRow label="Часовой пояс бизнеса" value={data.businessTimeZone} />
-          <StatusRow
-            label="Режим"
-            value={data.nodeEnv === 'production' ? 'Production' : 'Development'}
-          />
-          <StatusRow label="URL веб-приложения" value={data.webUrl} />
-          <StatusRow label="API prefix" value={data.apiPrefix} />
-          <p className="pt-2 text-xs text-muted-foreground">
-            Изменяемые бизнес-параметры (цены, скидки, роли) живут в соответствующих разделах. Здесь
-            только диагностика и системный контекст.
-          </p>
-        </section>
-      )}
+      <div className="flex gap-2">
+        {canSecurity ? (
+          <Button
+            type="button"
+            variant={tab === 'security' ? 'default' : 'outline'}
+            onClick={() => setTab('security')}
+          >
+            Безопасность и доступ
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant={tab === 'system' ? 'default' : 'outline'}
+          onClick={() => setTab('system')}
+        >
+          Система
+        </Button>
+      </div>
+
+      {tab === 'security' && canSecurity ? <SecuritySettingsPanel /> : null}
+
+      {tab === 'system' ? (
+        query.isLoading ? (
+          <p className="text-sm text-muted-foreground">Загрузка...</p>
+        ) : query.isError || !data ? (
+          <p className="text-sm text-danger-fg">Не удалось получить статус системы</p>
+        ) : (
+          <section className="space-y-3 rounded-[28px] border border-border bg-card p-5 sm:p-6">
+            <StatusRow
+              label="API"
+              value={data.health.status === 'ok' ? 'Работает' : 'Сбои'}
+              ok={data.health.status === 'ok'}
+            />
+            <StatusRow
+              label="База данных"
+              value={data.health.database === 'up' ? 'Доступна' : 'Недоступна'}
+              ok={data.health.database === 'up'}
+            />
+            <StatusRow label="Часовой пояс бизнеса" value={data.businessTimeZone} />
+            <StatusRow
+              label="Режим"
+              value={data.nodeEnv === 'production' ? 'Production' : 'Development'}
+            />
+            <StatusRow label="URL веб-приложения" value={data.webUrl} />
+            <StatusRow label="API prefix" value={data.apiPrefix} />
+          </section>
+        )
+      ) : null}
     </div>
   );
 }

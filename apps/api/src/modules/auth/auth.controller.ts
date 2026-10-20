@@ -116,6 +116,19 @@ export class AuthController {
     await this.authService.changePassword(user, dto, this.contextFrom(request));
   }
 
+  @Authenticated()
+  @Post('step-up')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Re-verify password for elevated admin operations' })
+  async stepUp(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { password: string },
+    @Req() request: Request,
+  ) {
+    return this.authService.stepUp(user, body.password, this.contextFrom(request));
+  }
+
   private contextFrom(request: Request) {
     const requestIdHeader = request.headers[REQUEST_ID_HEADER];
     return {

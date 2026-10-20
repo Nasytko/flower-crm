@@ -17,6 +17,10 @@ const USER_PUBLIC_SELECT = {
   isActive: true,
   lastLoginAt: true,
   lastLoginUserAgent: true,
+  pinEnabled: true,
+  pinHash: true,
+  pinUpdatedAt: true,
+  pinLockedUntil: true,
   createdAt: true,
   updatedAt: true,
 } as const;

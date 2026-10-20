@@ -11,7 +11,9 @@
     "reset:user-password": "node dist/reset-user-password.js",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --config jest.config.cjs"
+    "test": "jest --config jest.config.cjs",
+    "test:unit": "jest --config jest.config.cjs --testPathPattern=src/",
+    "test:live": "jest --config jest.config.cjs --testPathPattern=test/"
   },
   "dependencies": {
     "@erp/database": "workspace:*",

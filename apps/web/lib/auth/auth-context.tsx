@@ -22,6 +22,8 @@ interface AuthContextValue {
   bootstrapped: boolean;
   login: (login: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Apply tokens after PIN unlock / employee switch (clears prior identity). */
+  applySession: (accessToken: string, user: AuthUser) => void;
   hasPermission: (permission: Permission) => boolean;
 }
 
@@ -102,6 +104,15 @@ export function AuthProvider({
     }
   }, [clearAuth]);
 
+  const applySession = useCallback(
+    (token: string, nextUser: AuthUser) => {
+      queryClient.clear();
+      setAccessToken(token);
+      setUser(nextUser);
+    },
+    [queryClient, setAccessToken],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -109,9 +120,10 @@ export function AuthProvider({
       bootstrapped,
       login,
       logout,
+      applySession,
       hasPermission: (permission: Permission) => user?.permissions.includes(permission) ?? false,
     }),
-    [user, accessToken, bootstrapped, login, logout],
+    [user, accessToken, bootstrapped, login, logout, applySession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

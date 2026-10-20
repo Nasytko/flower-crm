@@ -2,22 +2,26 @@
 # erpbuket1 production deploy (update or controlled first bring-up).
 #
 # Operates on the CURRENT git working tree only -- does not git pull / reset.
+# Prefer the repo-root ./deploy.sh wrapper for "pull + apply" in one command.
 #
 # Usage (from /opt/erpbuket1):
-#   ./deploy/scripts/deploy.sh
+#   ./deploy.sh                      # recommended: fetch/pull + this script
+#   ./deploy/scripts/deploy.sh       # apply current tree only
 #
 # Optional:
 #   ERP_ENV_FILE=/etc/erpbuket1/production.env
 #   ALLOW_DIRTY=1
 #   SKIP_BUILD=1
+#   SKIP_UPLOADS_BACKUP=1
 #   HEALTH_RETRIES=45 HEALTH_SLEEP=2
 #   ALLOW_NONSTANDARD_APP_DIR=1
+#   DEPLOY_LOG_DIR=/var/log/erpbuket1
 #
 # Emergency only (existing DB):
 #   SKIP_BACKUP=1 CONFIRM_SKIP_BACKUP=YES I_UNDERSTAND_DATA_LOSS_RISK=YES
 #
 # Does NOT: git reset --hard, down -v, volume/system prune, seed/bootstrap,
-#           touch shopbuket1, modify Nginx.
+#           touch shopbuket1, modify Nginx, auto-restore DB after failed migrate.
 # Zero-downtime is NOT promised. Automatic app/DB rollback is NOT implemented.
 
 set -Eeuo pipefail
@@ -28,9 +32,13 @@ source "${SCRIPT_DIR}/lib/erpbuket1-env.sh"
 
 HEALTH_RETRIES="${HEALTH_RETRIES:-45}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-2}"
+DEPLOY_LOG_DIR="${DEPLOY_LOG_DIR:-/var/log/erpbuket1}"
+DEPLOY_STAGE="init"
 
-log() { erpbuket1_log "deploy: $*"; }
-die() { erpbuket1_die "deploy: $*"; }
+log() { erpbuket1_log "deploy[${DEPLOY_STAGE}]: $*"; }
+die() {
+  erpbuket1_die "deploy FAILED at stage=${DEPLOY_STAGE}: $*"
+}
 
 check_git_tree() {
   command -v git >/dev/null || die "git not found"
@@ -69,9 +77,31 @@ require_backup_or_emergency_skip() {
   log "existing DB -- ensuring postgres is up before backup"
   erpbuket1_ensure_postgres_ready "${HEALTH_RETRIES}" "${HEALTH_SLEEP}"
 
-  log "backup before migrate"
+  log "backup postgres before migrate"
   BACKUP_DIR="${BACKUP_DIR:-${ERP_BACKUP_DIR_DEFAULT}}" \
-    "${SCRIPT_DIR}/backup-postgres.sh" || die "backup failed -- deploy aborted (migrate not run)"
+    "${SCRIPT_DIR}/backup-postgres.sh" || die "postgres backup failed -- deploy aborted (migrate not run)"
+
+  if [[ "${SKIP_UPLOADS_BACKUP:-0}" == "1" ]]; then
+    log "SKIP_UPLOADS_BACKUP=1 -- uploads archive skipped"
+  else
+    log "backup uploads volume before migrate"
+    BACKUP_DIR="${BACKUP_DIR:-${ERP_BACKUP_DIR_DEFAULT}}" \
+      "${SCRIPT_DIR}/backup-uploads.sh" || die "uploads backup failed -- deploy aborted (migrate not run)"
+  fi
+}
+
+setup_deploy_log() {
+  mkdir -p "${DEPLOY_LOG_DIR}" 2>/dev/null || true
+  if [[ -d "${DEPLOY_LOG_DIR}" ]]; then
+    chmod 750 "${DEPLOY_LOG_DIR}" 2>/dev/null || true
+    DEPLOY_LOG_FILE="${DEPLOY_LOG_DIR}/deploy-$(date -u +%Y%m%dT%H%M%SZ).log"
+    # Tee stdout/stderr to log; never source env into the log via set -x.
+    exec > >(tee -a "${DEPLOY_LOG_FILE}") 2>&1
+    log "diagnostic log: ${DEPLOY_LOG_FILE}"
+  else
+    DEPLOY_LOG_FILE=""
+    erpbuket1_warn "deploy: cannot write ${DEPLOY_LOG_DIR}; continuing without file log"
+  fi
 }
 
 main() {
@@ -86,7 +116,8 @@ main() {
   root="$(erpbuket1_root_dir)"
   cd "${root}"
 
-  log "preflight"
+  DEPLOY_STAGE="preflight"
+  setup_deploy_log
   erpbuket1_check_commands git curl openssl
   erpbuket1_check_docker
   erpbuket1_check_resources
@@ -96,14 +127,11 @@ main() {
   erpbuket1_check_ports_available
   erpbuket1_check_shop_coexistence
 
+  DEPLOY_STAGE="db-state"
   db_state="$(erpbuket1_require_safe_db_state_for_deploy)"
 
   if [[ "${db_state}" == "fresh" ]]; then
     log "fresh: new postgres volume will be created on first postgres start"
-  fi
-  if [[ "${db_state}" == "existing" || "${db_state}" == "volume_unproven" ]]; then
-    # After successful provenance gate, ensure marker exists for future runs
-    :
   fi
   # Backup required for existing OR operator-accepted unproven volume (treated as data-bearing)
   if [[ "${db_state}" == "volume_unproven" ]]; then
@@ -112,38 +140,47 @@ main() {
     db_state_for_backup="${db_state}"
   fi
 
+  DEPLOY_STAGE="compose-validate"
   log "compose config validation"
   erpbuket1_compose config >/dev/null || die "compose config invalid"
 
   # Backup BEFORE build/migrate for data-bearing DBs (even if postgres was stopped).
+  DEPLOY_STAGE="backup"
   require_backup_or_emergency_skip "${db_state_for_backup}"
 
+  # Build while old api/web keep serving (minimize downtime).
+  DEPLOY_STAGE="build"
   if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
     log "SKIP_BUILD=1 -- not rebuilding images"
   else
-    log "building images"
+    log "building images (running containers stay up until up -d)"
     erpbuket1_compose build || die "image build failed -- API/Web not switched"
   fi
 
   # Always ensure postgres before migrate (fresh or existing).
+  DEPLOY_STAGE="postgres"
   erpbuket1_ensure_postgres_ready "${HEALTH_RETRIES}" "${HEALTH_SLEEP}"
 
-  log "prisma migrate deploy"
+  DEPLOY_STAGE="migrate"
+  log "prisma migrate deploy (NOT migrate dev / db push)"
   if ! erpbuket1_compose run --rm migrate; then
-    die "migration failed -- API/Web NOT updated; no automatic DB rollback"
+    die "migration failed -- API/Web NOT updated; no automatic DB rollback. Restore only with explicit restore-postgres.sh"
   fi
 
-  log "updating api + web (compose up -d; no down -v)"
+  DEPLOY_STAGE="restart"
+  log "updating api + web (compose up -d; no down -v; project ${ERP_COMPOSE_PROJECT} only)"
   erpbuket1_compose up -d api web || die "failed to start api/web"
 
+  DEPLOY_STAGE="health"
   log "healthcheck (internal)"
   if ! HEALTH_RETRIES="${HEALTH_RETRIES}" HEALTH_SLEEP="${HEALTH_SLEEP}" \
     "${SCRIPT_DIR}/healthcheck.sh" --mode=internal; then
-    die "healthcheck failed after deploy -- do NOT assume success; inspect logs"
+    die "healthcheck failed after deploy -- do NOT assume success; inspect logs (shop untouched)"
   fi
 
   erpbuket1_write_install_marker
   DEPLOY_OK=1
+  DEPLOY_STAGE="done"
 
   echo
   log "======== DEPLOY REPORT ========"
@@ -155,10 +192,12 @@ main() {
   log "project: ${ERP_COMPOSE_PROJECT}"
   log "web loopback: http://127.0.0.1:${ERP_WEB_PORT}/login"
   log "api loopback: http://127.0.0.1:${ERP_API_PORT}/api/v1/health"
+  [[ -n "${DEPLOY_LOG_FILE}" ]] && log "log: ${DEPLOY_LOG_FILE}"
   erpbuket1_compose ps
   log "NOTE: public HTTPS requires ./deploy/scripts/install-nginx.sh (+ issue-cert.sh)"
   log "NOTE: bootstrap users is manual (bootstrap-initial-users.sh)"
-  log "NOTE: automatic rollback is NOT implemented"
+  log "NOTE: automatic DB rollback is NOT implemented"
+  log "NOTE: shopbuket1 was not modified"
   log "==============================="
 }
 

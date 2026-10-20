@@ -101,16 +101,34 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     credentials: 'include',
   });
 
-  if (response.status === 401 && retry && !path.startsWith('/api/v1/auth/login')) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      return apiFetch<T>(path, init, false);
-    }
-    onUnauthorized();
-  }
-
   if (!response.ok) {
-    throw await parseError(response);
+    const error = await parseError(response);
+    if (error.status === 401 && error.body.code === 'WORKSTATION_LOCKED') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('erp:workstation-locked'));
+        try {
+          const channel = new BroadcastChannel('erp-workstation');
+          channel.postMessage({ type: 'locked' });
+          channel.close();
+        } catch {
+          // BroadcastChannel unavailable (older browsers / SSR)
+        }
+      }
+      throw error;
+    }
+    if (
+      error.status === 401 &&
+      retry &&
+      !path.startsWith('/api/v1/auth/login') &&
+      !path.startsWith('/api/v1/auth/pin/')
+    ) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        return apiFetch<T>(path, init, false);
+      }
+      onUnauthorized();
+    }
+    throw error;
   }
 
   if (response.status === 204) {

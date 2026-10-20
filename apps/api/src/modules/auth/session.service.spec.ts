@@ -41,13 +41,19 @@ describe('SessionService.refresh rotation', () => {
       tokenHash,
       previousTokenHash: null,
       revokedAt: null,
+      lockedAt: null,
+      authStrength: 'PASSWORD',
+      elevatedUntil: null,
+      workSessionId: null,
       expiresAt: new Date(Date.now() + 60_000),
       ipAddress: null,
       userAgent: null,
+      workSession: null,
       user: {
         id: 'u1',
         name: 'Director',
         login: 'director',
+        email: null,
         role: Role.DIRECTOR,
         isActive: true,
       },
@@ -73,13 +79,19 @@ describe('SessionService.refresh rotation', () => {
       userId: 'u1',
       tokenHash,
       revokedAt: null,
+      lockedAt: null,
+      authStrength: 'PASSWORD',
+      elevatedUntil: null,
+      workSessionId: null,
       expiresAt: new Date(Date.now() + 60_000),
       ipAddress: null,
       userAgent: null,
+      workSession: null,
       user: {
         id: 'u1',
         name: 'Director',
         login: 'director',
+        email: null,
         role: Role.DIRECTOR,
         isActive: true,
       },
@@ -134,10 +146,88 @@ describe('SessionService.refresh rotation', () => {
       id: 's1',
       userId: 'u1',
       revokedAt: null,
+      lockedAt: null,
+      authStrength: 'PASSWORD',
+      elevatedUntil: null,
+      workSessionId: null,
       expiresAt: new Date(Date.now() + 60_000),
+      workSession: null,
     });
 
     const auth = await service.resolveAuthenticatedUser(token);
     expect(auth?.id).toBe('u1');
+  });
+
+  it('allows refresh while workstation is locked', async () => {
+    const refreshToken = 'e'.repeat(64);
+    const tokenHash = hashToken(refreshToken);
+    prismaMock.session.findFirst.mockResolvedValue(null);
+    prismaMock.session.findUnique.mockResolvedValue({
+      id: 's1',
+      userId: 'u1',
+      tokenHash,
+      revokedAt: null,
+      lockedAt: new Date(),
+      authStrength: 'PIN',
+      elevatedUntil: null,
+      workSessionId: 'w1',
+      expiresAt: new Date(Date.now() + 60_000),
+      ipAddress: null,
+      userAgent: null,
+      workSession: {
+        id: 'w1',
+        closedAt: null,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
+      user: {
+        id: 'u1',
+        name: 'Florist',
+        login: 'florist',
+        email: null,
+        role: Role.FLORIST,
+        isActive: true,
+      },
+    });
+    prismaMock.session.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.rotateSession(refreshToken, {});
+    expect(result?.accessToken).toBeTruthy();
+    expect(result?.user.workstationLocked).toBe(true);
+    expect(result?.user.authStrength).toBe('PIN');
+  });
+
+  it('rejects refresh when work session is closed or expired', async () => {
+    const refreshToken = 'f'.repeat(64);
+    const tokenHash = hashToken(refreshToken);
+    prismaMock.session.findFirst.mockResolvedValue(null);
+    prismaMock.session.findUnique.mockResolvedValue({
+      id: 's1',
+      userId: 'u1',
+      tokenHash,
+      revokedAt: null,
+      lockedAt: null,
+      authStrength: 'PASSWORD',
+      elevatedUntil: null,
+      workSessionId: 'w1',
+      expiresAt: new Date(Date.now() + 60_000),
+      ipAddress: null,
+      userAgent: null,
+      workSession: {
+        id: 'w1',
+        closedAt: new Date(),
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
+      user: {
+        id: 'u1',
+        name: 'Director',
+        login: 'director',
+        email: null,
+        role: Role.DIRECTOR,
+        isActive: true,
+      },
+    });
+
+    await expect(service.rotateSession(refreshToken, {})).resolves.toBeNull();
+    expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
   });
 });

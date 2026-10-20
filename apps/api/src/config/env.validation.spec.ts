@@ -28,6 +28,7 @@ describe('validateEnv', () => {
       AUTH_LOGIN_WINDOW_SECONDS: 60,
       TRUST_PROXY: false,
       BUSINESS_TIME_ZONE: 'Europe/Minsk',
+      UPLOADS_DIR: 'uploads',
     });
   });
 

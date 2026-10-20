@@ -19,6 +19,11 @@ const SENSITIVE_KEY_EXACT = new Set([
   'previoustokenhash',
   'apikey',
   'api_key',
+  'pin',
+  'pinhash',
+  'pinplaintext',
+  'currentpin',
+  'newpin',
 ]);
 
 const SENSITIVE_KEY_SUBSTRINGS = [
@@ -28,6 +33,7 @@ const SENSITIVE_KEY_SUBSTRINGS = [
   'authorization',
   'cookie',
   'tokenhash',
+  'pinhash',
 ];
 
 const MAX_AUDIT_DEPTH = 6;
@@ -101,11 +107,24 @@ export function toPublicUser(
     isActive: boolean;
     lastLoginAt: Date | null;
     lastLoginUserAgent?: string | null;
+    pinEnabled?: boolean;
+    pinHash?: string | null;
+    pinUpdatedAt?: Date | null;
+    pinLockedUntil?: Date | null;
     createdAt: Date;
     updatedAt: Date;
   },
   sessionStats?: { hasActiveSession: boolean; activeSessionCount: number },
 ): Record<string, unknown> {
+  const pinEnabled = user.pinEnabled ?? false;
+  let pinStatus: 'DISABLED' | 'NOT_SET' | 'ACTIVE' | 'TEMP_LOCKED' = 'DISABLED';
+  if (pinEnabled) {
+    if (!user.pinHash) pinStatus = 'NOT_SET';
+    else if (user.pinLockedUntil && user.pinLockedUntil.getTime() > Date.now())
+      pinStatus = 'TEMP_LOCKED';
+    else pinStatus = 'ACTIVE';
+  }
+
   return {
     id: user.id,
     name: user.name,
@@ -117,6 +136,10 @@ export function toPublicUser(
     lastLoginUserAgent: user.lastLoginUserAgent ?? null,
     hasActiveSession: sessionStats?.hasActiveSession ?? false,
     activeSessionCount: sessionStats?.activeSessionCount ?? 0,
+    pinEnabled,
+    pinStatus,
+    pinUpdatedAt: user.pinUpdatedAt?.toISOString() ?? null,
+    pinLockedUntil: user.pinLockedUntil?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
   };

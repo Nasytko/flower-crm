@@ -14,6 +14,26 @@ enum Role {
   DIRECTOR
 }
 
+/// How the current employee session was established.
+enum AuthStrength {
+  PASSWORD
+  PIN
+}
+
+/// Trusted device employee allowlist mode (explicit; never infer from empty list).
+enum DeviceAccessMode {
+  ALL_PIN_USERS
+  SELECTED_USERS
+}
+
+enum WorkSessionCloseReason {
+  MANUAL
+  LOGOUT
+  EXPIRED
+  DEVICE_REVOKED
+  FORCE
+}
+
 enum ProductType {
   FLOWER
   SERVICE
@@ -73,6 +93,12 @@ model User {
   lastLoginAt         DateTime?
   /// User-Agent string from the most recent successful login.
   lastLoginUserAgent  String?
+  /// Fast PIN unlock (Argon2id hash only; plaintext never stored).
+  pinEnabled          Boolean   @default(false)
+  pinHash             String?
+  pinUpdatedAt        DateTime?
+  pinFailedAttempts   Int       @default(0)
+  pinLockedUntil      DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -88,29 +114,118 @@ model User {
   inventoryItemsCounted    InventoryItem[]    @relation("InventoryItemCounter")
   ordersCreated            Order[]            @relation("OrderCreator")
   ordersUpdated            Order[]            @relation("OrderUpdater")
+  trustedDevicesCreated    TrustedDevice[]    @relation("TrustedDeviceCreator")
+  workSessionsOpened       WorkSession[]      @relation("WorkSessionOpener")
+  deviceAllowlistEntries   TrustedDeviceUser[]
 
   @@index([role, isActive])
+  @@index([pinEnabled, isActive])
   @@map("users")
 }
 
 model Session {
-  id                String    @id @default(cuid())
+  id                String       @id @default(cuid())
   userId            String
-  tokenHash         String    @unique
+  tokenHash         String       @unique
   /// Previous refresh hash kept briefly for reuse/theft detection after rotation.
-  previousTokenHash String?   @unique
+  previousTokenHash String?      @unique
   ipAddress         String?
   userAgent         String?
   expiresAt         DateTime
   revokedAt         DateTime?
-  createdAt         DateTime  @default(now())
+  /// Workstation lock: protected APIs reject until PIN/password unlock.
+  lockedAt          DateTime?
+  authStrength      AuthStrength @default(PASSWORD)
+  /// After password step-up; required for critical admin ops.
+  elevatedUntil     DateTime?
+  workSessionId     String?
+  /// Last *user* activity (explicit heartbeat); not polling.
+  lastUserActivityAt DateTime?
+  createdAt         DateTime     @default(now())
   lastUsedAt        DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workSession WorkSession? @relation(fields: [workSessionId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([workSessionId])
+  @@index([lockedAt])
   @@map("sessions")
+}
+
+/// Singleton org-wide security policy (non-secret fields only).
+model SecurityPolicy {
+  id                           Int      @id @default(1)
+  pinEnabledOrg                Boolean  @default(true)
+  deviceTrustDays              Int      @default(30)
+  workSessionMaxHours          Int      @default(12)
+  idleLockMinutes              Int      @default(5)
+  pinMaxAttempts               Int      @default(5)
+  pinLockoutMinutes            Int      @default(15)
+  allowEmployeeSwitch          Boolean  @default(true)
+  /// Always true in application logic; stored for audit/display.
+  requirePasswordForWorkSession Boolean @default(true)
+  updatedAt                    DateTime @updatedAt
+  updatedByUserId              String?
+
+  @@map("security_policies")
+}
+
+model TrustedDevice {
+  id              String           @id @default(cuid())
+  name            String
+  tokenHash       String           @unique
+  accessMode      DeviceAccessMode @default(ALL_PIN_USERS)
+  createdByUserId String
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  lastSeenAt      DateTime?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  createdBy    User                @relation("TrustedDeviceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  allowedUsers TrustedDeviceUser[]
+  workSessions WorkSession[]
+
+  @@index([revokedAt, expiresAt])
+  @@map("trusted_devices")
+}
+
+model TrustedDeviceUser {
+  deviceId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  device TrustedDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([deviceId, userId])
+  @@index([userId])
+  @@map("trusted_device_users")
+}
+
+model WorkSession {
+  id              String                  @id @default(cuid())
+  deviceId        String
+  openedByUserId  String
+  openedAt        DateTime                @default(now())
+  /// Absolute end; never extended by idle/activity.
+  expiresAt       DateTime
+  closedAt        DateTime?
+  closeReason     WorkSessionCloseReason?
+  lockedAt        DateTime?
+  lastUserActivityAt DateTime?
+
+  device   TrustedDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  openedBy User          @relation("WorkSessionOpener", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  sessions Session[]
+
+  @@index([deviceId, closedAt])
+  @@index([expiresAt])
+  @@map("work_sessions")
 }
 
 model AuditLog {

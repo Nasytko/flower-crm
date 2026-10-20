@@ -104,7 +104,8 @@ Preferred single entrypoint (interactive env creation, postgres, migrate, api/we
 
 ```bash
 cd /opt/erpbuket1
-./deploy/scripts/install.sh
+./install.sh
+# equivalent: ./deploy/scripts/install.sh
 ```
 
 What `install.sh` does:
@@ -186,27 +187,43 @@ Renewal: host `certbot renew` timer/cron; dry-run: `certbot renew --dry-run`.
 
 ## 13. Update ERP
 
+**Recommended one-command update** (fetch/pull + backup + build + migrate + restart + health):
+
 ```bash
 cd /opt/erpbuket1
-git pull   # or fetch a known release tag
-./deploy/scripts/deploy.sh
+chmod +x deploy.sh install.sh deploy/scripts/*.sh   # once, if needed
+./deploy.sh
 ```
 
-`deploy.sh`:
+Root `./deploy.sh`:
 
-1. flock lock, validate env, ports
-2. If DB **existing**: start postgres if needed → **backup** → then build → migrate → up api/web
-3. Internal healthcheck
-4. Does **not** modify Nginx/Certbot/shop
+1. Confirms `/opt/erpbuket1`, git remote, and (by default) fast-forward pull of `DEPLOY_BRANCH` (default `main`)
+2. Refuses dirty trees unless `ALLOW_DIRTY=1`
+3. Delegates to `deploy/scripts/deploy.sh`
+
+Inner `deploy/scripts/deploy.sh`:
+
+1. flock lock, validate env, ports, shop coexistence hint
+2. If DB **existing**: ensure postgres → **postgres dump + uploads archive** → build (while old containers keep serving) → `prisma migrate deploy` → `up -d api web`
+3. Internal healthcheck + diagnostic log under `/var/log/erpbuket1/`
+4. Does **not** modify Nginx/Certbot/shop; never `down -v` / `docker system prune`
+
+Apply current tree without pulling:
+
+```bash
+SKIP_GIT_PULL=1 ./deploy.sh
+# or:
+./deploy/scripts/deploy.sh
+```
 
 Emergency skip backup (existing DB only):
 
 ```bash
 SKIP_BACKUP=1 CONFIRM_SKIP_BACKUP=YES I_UNDERSTAND_DATA_LOSS_RISK=YES \
-  ./deploy/scripts/deploy.sh
+  ./deploy.sh
 ```
 
-Dirty tree: `ALLOW_DIRTY=1 ./deploy/scripts/deploy.sh`
+Dirty tree: `ALLOW_DIRTY=1 ./deploy.sh`
 
 ---
 
@@ -214,18 +231,21 @@ Dirty tree: `ALLOW_DIRTY=1 ./deploy/scripts/deploy.sh`
 
 ```bash
 ./deploy/scripts/backup.sh
-# equivalent:
+# parts:
 ./deploy/scripts/backup-postgres.sh
+./deploy/scripts/backup-uploads.sh
 ```
 
 Behaviour:
 
-- Writes `/var/backups/erpbuket1/erpbuket1_YYYYMMDDTHHMMSSZ.dump`
+- Postgres: `/var/backups/erpbuket1/erpbuket1_YYYYMMDDTHHMMSSZ.dump`
+- Uploads volume: `/var/backups/erpbuket1/erpbuket1_uploads_YYYYMMDDTHHMMSSZ.tgz` (`erpbuket1_uploads_data` only)
 - `umask 077`, dir `700`, files `600`
 - Atomic write: `.partial` → `mv`
-- Verifies non-empty + `PGDMP` magic
-- Uses compose project `erpbuket1` only (never shop postgres)
+- Verifies non-empty + `PGDMP` / gzip magic
+- Uses compose project / volumes `erpbuket1_*` only (never shop)
 - **Auto-delete is OFF by default**
+- Deploy never auto-restores DB after a failed migration
 
 Documented retention: keep **14–30 days** of dumps locally; prune only after
 confirming several recent successful dumps exist:
@@ -306,16 +326,28 @@ If the app misbehaves after image rollback: restore a matching dump or deploy a 
 
 ---
 
-## 17. Diagnostics
+## 17. Diagnostics and failure stages
 
 ```bash
 ./deploy/scripts/status.sh
 ./deploy/scripts/healthcheck.sh --mode=internal
 ./deploy/scripts/healthcheck.sh --mode=public   # after HTTPS
+# latest deploy log (no secrets if env file not sourced):
+ls -lt /var/log/erpbuket1/deploy-*.log | head
 
 ERP_ENV_FILE=/etc/erpbuket1/production.env \
   docker compose --env-file "$ERP_ENV_FILE" -f docker-compose.prod.yml --project-name erpbuket1 logs -f api web
 ```
+
+| Stage / symptom | What to do |
+|-----------------|------------|
+| Git error (fetch/ff-only) | Fix network/auth or diverged commits; shop untouched; retry `./deploy.sh` |
+| Build error | Old api/web still running; fix code/deps; retry; no migrate yet if build failed before migrate |
+| Backup error | Deploy aborted before migrate; fix postgres/uploads; dumps kept |
+| Migration error | API/Web **not** switched to new migrate outcome mid-flight; **no auto DB restore**; inspect dump in `/var/backups/erpbuket1`; restore only with explicit `restore-postgres.sh` |
+| API/Web won't start | `compose logs api|web` (project `erpbuket1` only); volumes intact |
+| Health-check fail | Do not assume success; check logs; optional image rollback via `rollback.sh` **only if schema compatible** |
+| After migrate + bad app | Prefer **forward fix** release; image rollback does not downgrade Prisma schema |
 
 | Symptom | Likely cause |
 |---------|----------------|
