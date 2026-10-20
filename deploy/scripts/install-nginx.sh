@@ -11,6 +11,10 @@
 #
 # --mode=http   : HTTP vhost + ACME webroot (default, before certificate)
 # --mode=https  : HTTP->HTTPS redirect + TLS (requires existing Let's Encrypt cert)
+#
+# Test overrides (offline unit tests only):
+#   ERP_NGINX_AVAILABLE ERP_NGINX_ENABLED ERP_NGINX_SCAN_GLOBS
+#   ERP_SKIP_NGINX_BINARY=1 ERP_SKIP_SYSTEMCTL=1
 
 set -Eeuo pipefail
 
@@ -24,6 +28,8 @@ TEMPLATE_HTTP="${ROOT}/deploy/nginx/erpbuket1.conf.template"
 TEMPLATE_SSL="${ROOT}/deploy/nginx/erpbuket1.ssl.conf.template"
 BACKUP=""
 NGINX_WRITE_STARTED=0
+ENABLED_WAS_PRESENT=0
+ENABLED_PREV_LINK=""
 
 log() { erpbuket1_log "nginx: $*"; }
 die() { erpbuket1_die "nginx: $*"; }
@@ -42,29 +48,41 @@ done
 
 [[ "${MODE}" == "http" || "${MODE}" == "https" ]] || die "invalid mode"
 
+# Restore ERP available file + sites-enabled symlink to pre-write state.
+restore_nginx_state() {
+  if [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
+    log "restoring previous ERP nginx config from ${BACKUP}"
+    cp -a "${BACKUP}" "${ERP_NGINX_AVAILABLE}" || true
+  else
+    rm -f "${ERP_NGINX_AVAILABLE}" || true
+  fi
+
+  if [[ "${ENABLED_WAS_PRESENT}" == "1" ]]; then
+    if [[ -n "${ENABLED_PREV_LINK}" ]]; then
+      ln -sfn "${ENABLED_PREV_LINK}" "${ERP_NGINX_ENABLED}" || true
+    elif [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
+      # Was present as our enabled link; re-point at restored available
+      ln -sfn "${ERP_NGINX_AVAILABLE}" "${ERP_NGINX_ENABLED}" || true
+    fi
+  else
+    # We created the enabled link on this run — remove it
+    rm -f "${ERP_NGINX_ENABLED}" || true
+  fi
+
+  if [[ "${ERP_SKIP_NGINX_BINARY:-0}" != "1" ]]; then
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+  fi
+}
+
 rollback_nginx_write() {
   if [[ "${NGINX_WRITE_STARTED}" != "1" ]]; then
     return 0
   fi
   erpbuket1_warn "nginx: rolling back ERP vhost after interrupt/failure"
-  if [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
-    cp -a "${BACKUP}" "${ERP_NGINX_AVAILABLE}" || true
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-  else
-    rm -f "${ERP_NGINX_ENABLED}" "${ERP_NGINX_AVAILABLE}" || true
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-  fi
+  restore_nginx_state
 }
 
-restore_backup() {
-  if [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
-    log "restoring previous ERP nginx config from ${BACKUP}"
-    cp -a "${BACKUP}" "${ERP_NGINX_AVAILABLE}" || true
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-  fi
-}
-
-# Safe placeholder substitution (no sed with untrusted domain).
+# Safe placeholder substitution (bash parameter expansion only — no sed).
 render_template() {
   local src="$1" dest="$2"
   local domain web api acme cert key line
@@ -97,39 +115,68 @@ render_template() {
   grep -F "server_name ${domain};" "${dest}" >/dev/null || die "render missing server_name ${domain}"
   grep -F "127.0.0.1:${web}" "${dest}" >/dev/null || die "render missing web upstream port"
   grep -F "127.0.0.1:${api}" "${dest}" >/dev/null || die "render missing api upstream port"
+  grep -F "location /api/" "${dest}" >/dev/null || die "render missing /api/ location"
+  grep -F "proxy_pass http://erpbuket1_api_upstream" "${dest}" >/dev/null || die "render missing API upstream proxy_pass"
+  grep -F "erpbuket1_web_upstream" "${dest}" >/dev/null || die "render missing ERP web upstream name"
+  if [[ "${MODE}" == "http" || "${src}" == "${TEMPLATE_HTTP}" ]]; then
+    grep -F ".well-known/acme-challenge" "${dest}" >/dev/null || die "HTTP template missing ACME challenge location"
+  fi
 }
 
+# Scan active nginx include dirs for foreign server_name == domain (exact token).
 assert_no_foreign_server_name_collision() {
   local domain="$1"
-  local f real token
-  local escaped
-  escaped="$(erpbuket1_escape_grep_fixed "${domain}")"
-  for f in /etc/nginx/sites-enabled/*; do
-    [[ -e "${f}" ]] || continue
-    real="$(readlink -f "${f}" 2>/dev/null || echo "${f}")"
-    if [[ "${real}" == "$(readlink -f "${ERP_NGINX_AVAILABLE}" 2>/dev/null || echo "${ERP_NGINX_AVAILABLE}")" ]]; then
-      continue
-    fi
-    if [[ "${f}" == "${ERP_NGINX_ENABLED}" ]]; then
-      continue
-    fi
-    # Tokenize server_name lines; require exact hostname token match
-    while IFS= read -r token; do
-      [[ -n "${token}" ]] || continue
-      if [[ "${token}" == "${domain}" ]]; then
-        die "domain ${domain} already appears in ${f} -- refusing duplicate server_name"
+  local f real our_real
+  local -a globs=()
+
+  erpbuket1_validate_hostname "${domain}" || die "ERP_DOMAIN is not a valid DNS hostname"
+
+  if [[ -n "${ERP_NGINX_SCAN_GLOBS:-}" ]]; then
+    # shellcheck disable=SC2206
+    globs=(${ERP_NGINX_SCAN_GLOBS})
+  else
+    globs=(/etc/nginx/sites-enabled/\* /etc/nginx/conf.d/\*.conf)
+  fi
+
+  our_real="$(readlink -f "${ERP_NGINX_AVAILABLE}" 2>/dev/null || echo "${ERP_NGINX_AVAILABLE}")"
+
+  local g
+  for g in "${globs[@]}"; do
+    # Expand each glob carefully
+    # shellcheck disable=SC2086
+    for f in ${g}; do
+      [[ -e "${f}" ]] || continue
+      real="$(readlink -f "${f}" 2>/dev/null || echo "${f}")"
+      # Skip our own ERP vhost (available or enabled symlink to it)
+      if [[ "${real}" == "${our_real}" ]]; then
+        continue
       fi
-    done < <(grep -E "^[[:space:]]*server_name[[:space:]]+" "${f}" 2>/dev/null \
-      | sed -e 's/#.*//' -e 's/server_name//' -e 's/;//g' \
-      | tr ' ' '\n' | grep -E . || true)
-    # Also catch compacted forms via escaped literal regex
-    if grep -E "server_name[[:space:]].*[[:space:]]${escaped}([[:space:;]]|$)" "${f}" >/dev/null 2>&1; then
-      # verify with fixed-string as well
-      if grep -F "${domain}" "${f}" >/dev/null 2>&1; then
-        die "domain ${domain} already appears in ${f} -- refusing duplicate server_name"
+      if [[ "${f}" == "${ERP_NGINX_ENABLED}" ]]; then
+        continue
       fi
-    fi
+      if erpbuket1_nginx_file_has_server_name "${domain}" "${f}"; then
+        die "domain ${domain} already appears as server_name in ${f} -- refusing duplicate (shop or other vhost)"
+      fi
+    done
   done
+}
+
+capture_enabled_state() {
+  ENABLED_WAS_PRESENT=0
+  ENABLED_PREV_LINK=""
+  if [[ -L "${ERP_NGINX_ENABLED}" ]]; then
+    ENABLED_WAS_PRESENT=1
+    ENABLED_PREV_LINK="$(readlink "${ERP_NGINX_ENABLED}" 2>/dev/null || true)"
+  elif [[ -e "${ERP_NGINX_ENABLED}" ]]; then
+    ENABLED_WAS_PRESENT=1
+    ENABLED_PREV_LINK=""
+    # Linux VPS must use a symlink. Offline Windows tests may get a regular file from ln.
+    if [[ "${ERP_SKIP_NGINX_BINARY:-0}" == "1" ]]; then
+      erpbuket1_warn "ERP_NGINX_ENABLED is not a symlink (test mode) — continuing"
+    else
+      die "ERP_NGINX_ENABLED exists but is not a symlink: ${ERP_NGINX_ENABLED} — refuse to overwrite"
+    fi
+  fi
 }
 
 main() {
@@ -138,7 +185,6 @@ main() {
   fi
 
   erpbuket1_setup_tmp_trap
-  # Extend traps to roll back nginx write on INT/TERM
   # shellcheck disable=SC2064
   trap 'rollback_nginx_write; rm -rf "${ERP_TMP_DIR:-}"; exit 130' INT
   # shellcheck disable=SC2064
@@ -146,15 +192,21 @@ main() {
   # shellcheck disable=SC2064
   trap 'rm -rf "${ERP_TMP_DIR:-}"' EXIT
 
-  erpbuket1_acquire_lock
-  erpbuket1_require_app_dir
+  if [[ "${ERP_SKIP_LOCK:-0}" != "1" ]]; then
+    erpbuket1_acquire_lock
+  fi
+  if [[ "${ALLOW_NONSTANDARD_APP_DIR:-}" != "1" ]]; then
+    erpbuket1_require_app_dir
+  fi
   erpbuket1_require_env_file
   erpbuket1_validate_env
   erpbuket1_load_ports
   erpbuket1_load_public_identity
 
-  erpbuket1_check_commands nginx
-  command -v systemctl >/dev/null || die "systemctl not found"
+  if [[ "${ERP_SKIP_NGINX_BINARY:-0}" != "1" ]]; then
+    erpbuket1_check_commands nginx
+    command -v systemctl >/dev/null || die "systemctl not found"
+  fi
 
   local domain
   domain="$(erpbuket1_env_get ERP_DOMAIN)"
@@ -165,7 +217,9 @@ main() {
   if [[ "${MODE}" == "https" ]]; then
     local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
     local key="/etc/letsencrypt/live/${domain}/privkey.pem"
-    [[ -f "${cert}" && -f "${key}" ]] || die "TLS files missing for ${domain}; run issue-cert.sh first"
+    if [[ "${ERP_SKIP_NGINX_BINARY:-0}" != "1" ]]; then
+      [[ -f "${cert}" && -f "${key}" ]] || die "TLS files missing for ${domain}; run issue-cert.sh first"
+    fi
   fi
 
   mkdir -p "${ERP_ACME_WEBROOT}/.well-known/acme-challenge"
@@ -178,6 +232,10 @@ main() {
     render_template "${TEMPLATE_HTTP}" "${rendered}"
   fi
 
+  capture_enabled_state
+
+  mkdir -p "$(dirname "${ERP_NGINX_AVAILABLE}")" "$(dirname "${ERP_NGINX_ENABLED}")"
+
   if [[ -f "${ERP_NGINX_AVAILABLE}" ]]; then
     BACKUP="${ERP_NGINX_AVAILABLE}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
     cp -a "${ERP_NGINX_AVAILABLE}" "${BACKUP}"
@@ -186,16 +244,29 @@ main() {
 
   NGINX_WRITE_STARTED=1
   install -m 644 "${rendered}" "${ERP_NGINX_AVAILABLE}"
-  ln -sfn "${ERP_NGINX_AVAILABLE}" "${ERP_NGINX_ENABLED}"
+  if ln -sfn "${ERP_NGINX_AVAILABLE}" "${ERP_NGINX_ENABLED}" 2>/dev/null; then
+    :
+  elif [[ "${ERP_SKIP_NGINX_BINARY:-0}" == "1" ]]; then
+    # Windows/Git Bash without symlink privilege: copy for offline tests only
+    cp -a "${ERP_NGINX_AVAILABLE}" "${ERP_NGINX_ENABLED}"
+    erpbuket1_warn "symlink unavailable — copied ERP vhost into enabled path (test mode only)"
+  else
+    restore_nginx_state
+    NGINX_WRITE_STARTED=0
+    die "failed to create symlink ${ERP_NGINX_ENABLED} -> ${ERP_NGINX_AVAILABLE}"
+  fi
+
+  if [[ "${ERP_SKIP_NGINX_BINARY:-0}" == "1" ]]; then
+    log "ERP_SKIP_NGINX_BINARY=1 -- skip nginx -t / reload (test mode)"
+    NGINX_WRITE_STARTED=0
+    log "SUCCESS -- ERP vhost written (${MODE}) [test mode]"
+    return 0
+  fi
 
   log "testing full nginx config (nginx -t is global read-only check)"
   if ! nginx -t; then
     erpbuket1_warn "nginx -t failed -- rolling back ERP vhost only"
-    if [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
-      restore_backup
-    else
-      rm -f "${ERP_NGINX_ENABLED}" "${ERP_NGINX_AVAILABLE}" || true
-    fi
+    restore_nginx_state
     NGINX_WRITE_STARTED=0
     die "nginx -t failed; shop configs were not modified by this script"
   fi
@@ -203,11 +274,7 @@ main() {
   log "reloading nginx"
   if ! systemctl reload nginx; then
     erpbuket1_warn "reload failed -- rolling back ERP vhost only"
-    if [[ -n "${BACKUP}" && -f "${BACKUP}" ]]; then
-      restore_backup
-    else
-      rm -f "${ERP_NGINX_ENABLED}" "${ERP_NGINX_AVAILABLE}" || true
-    fi
+    restore_nginx_state
     NGINX_WRITE_STARTED=0
     die "systemctl reload nginx failed"
   fi
@@ -225,4 +292,7 @@ main() {
   fi
 }
 
-main "$@"
+# Allow sourcing functions from tests without running main.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

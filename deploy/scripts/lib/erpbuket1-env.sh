@@ -432,9 +432,41 @@ erpbuket1_validate_hostname() {
   [[ "${h}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
 }
 
-erpbuket1_escape_grep_fixed() {
-  # Escape basic regex metacharacters for literal match in grep -E
-  printf '%s' "$1" | sed -e 's/[.[\\*^$()+?{|]/g'
+# Extract server_name hostname tokens from an nginx config fragment.
+# Exact tokens only (no regex on the domain value). Skips comments.
+erpbuket1_nginx_server_name_tokens() {
+  local file="$1"
+  local line cleaned
+  [[ -f "${file}" || -L "${file}" ]] || return 0
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    # Strip comments
+    line="${line%%#*}"
+    # Collapse leading whitespace for prefix check
+    cleaned="${line#"${line%%[![:space:]]*}"}"
+    case "${cleaned}" in
+      server_name[[:space:]]*|server_name)
+        cleaned="${cleaned#server_name}"
+        cleaned="${cleaned%;*}"
+        cleaned="${cleaned%;}"
+        # shellcheck disable=SC2086
+        set -- ${cleaned}
+        local tok
+        for tok in "$@"; do
+          [[ -n "${tok}" && "${tok}" != ";" ]] || continue
+          printf '%s\n' "${tok}"
+        done
+        ;;
+    esac
+  done <"${file}"
+}
+
+# True if domain appears as an exact server_name token in file.
+erpbuket1_nginx_file_has_server_name() {
+  local domain="$1" file="$2" tok
+  while IFS= read -r tok; do
+    [[ "${tok}" == "${domain}" ]] && return 0
+  done < <(erpbuket1_nginx_server_name_tokens "${file}")
+  return 1
 }
 
 # Resolve domain and optionally require it matches a local IPv4 address.
