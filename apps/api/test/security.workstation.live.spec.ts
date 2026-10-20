@@ -67,7 +67,6 @@ describe('Workstation PIN security (live DB)', () => {
       await prisma.$queryRaw`SELECT 1`;
       await prisma.securityPolicy.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.warn(
         '[security.workstation.live] NOT RUN: no reachable non-production PostgreSQL (do not use production ERP DB).',
         err instanceof Error ? err.message : err,
@@ -223,7 +222,6 @@ describe('Workstation PIN security (live DB)', () => {
 
   it('reports NOT RUN when live PostgreSQL is unavailable', () => {
     if (ready) return;
-    // eslint-disable-next-line no-console
     console.warn(
       'NOT RUN: security.workstation.live — AuthGuard lock, PIN unlock, concurrency, revoke, refresh-after-close',
     );
@@ -232,7 +230,6 @@ describe('Workstation PIN security (live DB)', () => {
 
   it('blocks protected APIs after lock; AllowLocked and refresh still work', async () => {
     if (!ready) {
-      // eslint-disable-next-line no-console
       console.warn('NOT RUN: lock/refresh live scenario');
       return;
     }

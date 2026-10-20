@@ -16,7 +16,7 @@ export class EmployeePinService {
 
   async enable(actor: AuthenticatedUser, userId: string, context: RequestContext) {
     this.assertElevated(actor);
-    const user = await this.requireUser(userId);
+    await this.requireUser(userId);
     await this.prisma.user.update({
       where: { id: userId },
       data: { pinEnabled: true },
