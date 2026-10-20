@@ -17,6 +17,8 @@ export interface AppEnv {
   YANDEX_MAPS_API_KEY?: string;
   /** Optional bias center "lon,lat" for Suggest (e.g. Grodno: 23.8313,53.6694). */
   YANDEX_SUGGEST_LL?: string;
+  /** Absolute or relative directory for product image files. */
+  UPLOADS_DIR: string;
 }
 
 const NODE_ENV_VALUES = new Set<NodeEnv>(['development', 'test', 'production']);
@@ -122,6 +124,7 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
   const businessTimeZone = readBusinessTimeZone(config, errors);
   const yandexMapsApiKey = readString(config, 'YANDEX_MAPS_API_KEY');
   const yandexSuggestLl = readYandexSuggestLl(config, errors);
+  const uploadsDir = readString(config, 'UPLOADS_DIR') ?? 'uploads';
 
   if (errors.length > 0) {
     throw new Error(`Invalid environment configuration:\n- ${errors.join('\n- ')}`);
@@ -140,6 +143,7 @@ export function validateEnv(config: Record<string, unknown>): AppEnv {
     AUTH_LOGIN_WINDOW_SECONDS: authLoginWindowSeconds,
     TRUST_PROXY: trustProxy,
     BUSINESS_TIME_ZONE: businessTimeZone,
+    UPLOADS_DIR: uploadsDir,
     ...(yandexMapsApiKey ? { YANDEX_MAPS_API_KEY: yandexMapsApiKey } : {}),
     ...(yandexSuggestLl ? { YANDEX_SUGGEST_LL: yandexSuggestLl } : {}),
   };

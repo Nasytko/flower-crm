@@ -23,6 +23,15 @@ enum Unit {
   PIECE
 }
 
+/// Controlled vocabulary for flower product characteristics (no admin UI).
+enum ProductAttrKind {
+  FLOWER_KIND
+  FLOWER_FORM
+  VARIETY
+  COLOR
+  ORIGIN
+}
+
 enum StockMovementType {
   SUPPLY
   SUPPLY_REVERSAL
@@ -127,6 +136,53 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+/// Shared attribute values for FLOWER nomenclature (created inline from product card).
+model ProductAttributeValue {
+  id             String          @id @default(cuid())
+  kind           ProductAttrKind
+  name           String
+  /// Lowercased trimmed collapsed whitespace for uniqueness.
+  normalizedName String
+  /// Empty string when root-level; otherwise parent attribute id (e.g. kind for variety).
+  parentKey      String          @default("")
+  parentId       String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  parent   ProductAttributeValue?  @relation("AttrHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children ProductAttributeValue[] @relation("AttrHierarchy")
+
+  productsAsKind    Product[] @relation("ProductFlowerKind")
+  productsAsForm    Product[] @relation("ProductFlowerForm")
+  productsAsVariety Product[] @relation("ProductVariety")
+  productsAsColor   Product[] @relation("ProductColor")
+  productsAsOrigin  Product[] @relation("ProductOrigin")
+
+  @@unique([kind, parentKey, normalizedName])
+  @@index([kind, parentKey])
+  @@index([parentId])
+  @@map("product_attribute_values")
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  /// Null while staged before product save; attached on create/update.
+  productId String?
+  mimeType  String
+  byteSize  Int
+  width     Int?
+  height    Int?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product        Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  primaryFor     Product? @relation("ProductPrimaryImage")
+
+  @@index([productId, sortOrder])
+  @@index([createdAt])
+  @@map("product_images")
+}
+
 model Product {
   id            String      @id @default(cuid())
   name          String
@@ -138,8 +194,24 @@ model Product {
   purchasePrice Decimal?    @db.Decimal(12, 2)
   salePrice     Decimal?    @db.Decimal(12, 2)
   isActive      Boolean     @default(true)
+  /// FLOWER-only optional characteristics (null for SERVICE / legacy rows).
+  flowerKindId  String?
+  flowerFormId  String?
+  varietyId     String?
+  colorId       String?
+  originId      String?
+  stemLengthCm  Int?
+  primaryImageId String?    @unique
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+
+  flowerKind  ProductAttributeValue? @relation("ProductFlowerKind", fields: [flowerKindId], references: [id], onDelete: SetNull)
+  flowerForm  ProductAttributeValue? @relation("ProductFlowerForm", fields: [flowerFormId], references: [id], onDelete: SetNull)
+  variety     ProductAttributeValue? @relation("ProductVariety", fields: [varietyId], references: [id], onDelete: SetNull)
+  color       ProductAttributeValue? @relation("ProductColor", fields: [colorId], references: [id], onDelete: SetNull)
+  origin      ProductAttributeValue? @relation("ProductOrigin", fields: [originId], references: [id], onDelete: SetNull)
+  primaryImage ProductImage?         @relation("ProductPrimaryImage", fields: [primaryImageId], references: [id], onDelete: SetNull)
+  images       ProductImage[]
 
   stock          ProductStock?
   movements      StockMovement[]
@@ -154,6 +226,9 @@ model Product {
   @@index([type, isActive])
   @@index([name])
   @@index([isActive, name])
+  @@index([flowerKindId])
+  @@index([varietyId])
+  @@index([colorId])
   @@map("products")
 }
 

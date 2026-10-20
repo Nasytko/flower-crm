@@ -1,15 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Permission,
   PRODUCT_TYPE_LABELS_RU,
+  ProductAttrKind,
   ProductType,
   STOCK_MOVEMENT_TYPE_LABELS_RU,
   UNIT_LABELS_RU,
   Unit,
+  suggestFlowerProductName,
+  type ProductImageDto,
   type ProductListItem,
 } from '@erp/shared';
 import { useAuth } from '@/lib/auth/auth-context';
@@ -19,6 +22,7 @@ import {
   listStockMovements,
   updateProduct,
   writeOffStock,
+  type ProductWriteInput,
 } from '@/lib/api/products';
 import { getActiveInventory } from '@/lib/api/inventories';
 import { queryKeys } from '@/lib/query-keys';
@@ -35,6 +39,13 @@ import {
 } from '@/components/ui/page-header';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { FilterSelect, SearchableSelect } from '@/components/ui/searchable-select';
+import {
+  AttrSelection,
+  CreatableAttrSelect,
+  attrSelectionFromProduct,
+  attrSelectionToRef,
+} from '@/components/ui/creatable-attr-select';
+import { ProductImageLightbox, ProductImageUploader, ProductThumb } from '@/components/ui/product-image';
 import { StatRow } from '@/components/ui/stat-row';
 import { userFacingError } from '@/lib/api/error-messages';
 import { cn } from '@/lib/utils';
@@ -65,6 +76,10 @@ export function WarehousePage(): ReactElement {
   const [editing, setEditing] = useState<ProductListItem | null>(null);
   const [writeOffTarget, setWriteOffTarget] = useState<ProductListItem | null>(null);
   const [historyProduct, setHistoryProduct] = useState<ProductListItem | null>(null);
+  const [lightbox, setLightbox] = useState<{
+    images: ProductImageDto[];
+    id: string | null;
+  } | null>(null);
 
   const listParams = useMemo(
     () => ({
@@ -314,12 +329,18 @@ export function WarehousePage(): ReactElement {
                         )}
                       >
                         <td className="px-5 py-3">
-                          <div
-                            className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-soft to-muted text-lg text-foreground/70"
-                            aria-hidden
-                          >
-                            {stock.isFlower ? '✿' : '◇'}
-                          </div>
+                          <ProductThumb
+                            image={product.images?.find((i) => i.isPrimary) ?? product.images?.[0]}
+                            fallback={stock.isFlower ? '✿' : '◇'}
+                            onOpen={() =>
+                              product.images?.length
+                                ? setLightbox({
+                                    images: product.images,
+                                    id: product.primaryImageId ?? product.images[0]?.id ?? null,
+                                  })
+                                : undefined
+                            }
+                          />
                         </td>
                         <td className="px-3 py-3">
                           <div className="font-medium text-foreground">{product.name}</div>
@@ -398,12 +419,19 @@ export function WarehousePage(): ReactElement {
                     )}
                   >
                     <div className="flex items-start gap-3">
-                      <div
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-soft to-muted text-base text-foreground/70"
-                        aria-hidden
-                      >
-                        {stock.isFlower ? '✿' : '◇'}
-                      </div>
+                      <ProductThumb
+                        image={product.images?.find((i) => i.isPrimary) ?? product.images?.[0]}
+                        fallback={stock.isFlower ? '✿' : '◇'}
+                        size="md"
+                        onOpen={() =>
+                          product.images?.length
+                            ? setLightbox({
+                                images: product.images,
+                                id: product.primaryImageId ?? product.images[0]?.id ?? null,
+                              })
+                            : undefined
+                        }
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-foreground">{product.name}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
@@ -505,21 +533,21 @@ export function WarehousePage(): ReactElement {
         </div>
       ) : null}
 
+      {lightbox ? (
+        <ProductImageLightbox
+          open
+          images={lightbox.images}
+          initialId={lightbox.id}
+          onClose={() => setLightbox(null)}
+        />
+      ) : null}
+
       {createOpen ? (
         <ProductFormDialog
           title="Новый товар"
           submitLabel="Создать"
           onClose={() => setCreateOpen(false)}
-          onSubmit={(values) =>
-            createMutation.mutate({
-              name: values.name,
-              type: values.type,
-              unit: values.unit,
-              description: values.description,
-              purchasePrice: values.purchasePrice,
-              salePrice: values.salePrice,
-            })
-          }
+          onSubmit={(values) => createMutation.mutate(values)}
           pending={createMutation.isPending}
           allowType
           canViewPurchase={canViewPurchase}
@@ -535,13 +563,7 @@ export function WarehousePage(): ReactElement {
           onSubmit={(values) =>
             updateMutation.mutate({
               id: editing.id,
-              data: {
-                name: values.name,
-                description: values.description,
-                purchasePrice:
-                  editing.type === ProductType.SERVICE ? values.purchasePrice : undefined,
-                salePrice: values.salePrice,
-              },
+              data: values,
             })
           }
           pending={updateMutation.isPending}
@@ -768,36 +790,115 @@ function ProductFormDialog({
   submitLabel: string;
   product?: ProductListItem;
   onClose: () => void;
-  onSubmit: (values: {
-    name: string;
-    type: ProductType;
-    unit: Unit;
-    description?: string | null;
-    purchasePrice?: string | null;
-    salePrice?: string | null;
-  }) => void;
+  onSubmit: (values: ProductWriteInput & { type: ProductType; unit: Unit; name: string }) => void;
   pending: boolean;
   allowType: boolean;
   canViewPurchase: boolean;
 }): ReactElement {
   const [name, setName] = useState(product?.name ?? '');
+  const [nameTouched, setNameTouched] = useState(Boolean(product));
   const [type, setType] = useState<ProductType>(product?.type ?? ProductType.FLOWER);
   const [description, setDescription] = useState(product?.description ?? '');
   const [purchasePrice, setPurchasePrice] = useState(product?.purchasePrice ?? '');
   const [salePrice, setSalePrice] = useState(product?.salePrice ?? '');
+  const [flowerKind, setFlowerKind] = useState<AttrSelection>(
+    attrSelectionFromProduct(product?.flowerKindId, product?.flowerKind?.name),
+  );
+  const [flowerForm, setFlowerForm] = useState<AttrSelection>(
+    attrSelectionFromProduct(product?.flowerFormId, product?.flowerForm?.name),
+  );
+  const [variety, setVariety] = useState<AttrSelection>(
+    attrSelectionFromProduct(product?.varietyId, product?.variety?.name),
+  );
+  const [color, setColor] = useState<AttrSelection>(
+    attrSelectionFromProduct(product?.colorId, product?.color?.name),
+  );
+  const [origin, setOrigin] = useState<AttrSelection>(
+    attrSelectionFromProduct(product?.originId, product?.origin?.name),
+  );
+  const [stemLengthCm, setStemLengthCm] = useState(
+    product?.stemLengthCm != null ? String(product.stemLengthCm) : '',
+  );
+  const [images, setImages] = useState<ProductImageDto[]>(product?.images ?? []);
+  const [primaryImageId, setPrimaryImageId] = useState<string | null>(
+    product?.primaryImageId ?? null,
+  );
+  const [kindWarning, setKindWarning] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const isEdit = Boolean(product);
+  const effectiveType = allowType ? type : product!.type;
+  const isFlower = effectiveType === ProductType.FLOWER;
 
-  const showPurchasePrice =
-    canViewPurchase &&
-    (allowType ? type === ProductType.SERVICE : product?.type === ProductType.SERVICE);
+  const showPurchasePrice = canViewPurchase && effectiveType === ProductType.SERVICE;
+
+  const kindParentId =
+    flowerKind?.mode === 'existing'
+      ? flowerKind.id
+      : flowerKind?.mode === 'draft'
+        ? flowerKind.draftKey
+        : null;
+
+  const suggestedName = useMemo(
+    () =>
+      suggestFlowerProductName({
+        kindName: flowerKind?.name,
+        formName: flowerForm?.name,
+        varietyName: variety?.name,
+        colorName: color?.name,
+        stemLengthCm: stemLengthCm.trim() ? Number.parseInt(stemLengthCm, 10) : null,
+      }),
+    [flowerKind, flowerForm, variety, color, stemLengthCm],
+  );
+
+  useEffect(() => {
+    if (!isFlower || nameTouched || isEdit) return;
+    if (suggestedName.length >= 2) {
+      setName(suggestedName);
+    }
+  }, [suggestedName, isFlower, nameTouched, isEdit]);
+
+  const onKindChange = (next: AttrSelection) => {
+    const prevId =
+      flowerKind?.mode === 'existing'
+        ? flowerKind.id
+        : flowerKind?.mode === 'draft'
+          ? flowerKind.draftKey
+          : null;
+    const nextId =
+      next?.mode === 'existing' ? next.id : next?.mode === 'draft' ? next.draftKey : null;
+    setFlowerKind(next);
+    if (prevId && nextId && prevId !== nextId) {
+      const cleared: string[] = [];
+      if (variety) {
+        setVariety(null);
+        cleared.push('сорт');
+      }
+      if (flowerForm) {
+        setFlowerForm(null);
+        cleared.push('форма');
+      }
+      if (cleared.length) {
+        setKindWarning(
+          `Вид изменён — сброшены несовместимые поля: ${cleared.join(', ')}. Выберите значения заново.`,
+        );
+      } else {
+        setKindWarning(null);
+      }
+    } else if (!next) {
+      setVariety(null);
+      setFlowerForm(null);
+      setKindWarning(null);
+    } else {
+      setKindWarning(null);
+    }
+  };
 
   return (
     <ResponsiveDialog
       open
       onClose={onClose}
       title={title}
-      size="md"
+      size="lg"
       footer={
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
@@ -828,26 +929,60 @@ function ProductFormDialog({
             setLocalError('Укажите название');
             return;
           }
+          let stem: number | null = null;
+          if (isFlower && stemLengthCm.trim()) {
+            const parsed = Number.parseInt(stemLengthCm, 10);
+            if (!Number.isInteger(parsed) || parsed < 1 || parsed > 300) {
+              setLocalError('Длина стебля — целое число от 1 до 300 см');
+              return;
+            }
+            stem = parsed;
+          }
           setLocalError(null);
-          const isService = allowType
-            ? type === ProductType.SERVICE
-            : product?.type === ProductType.SERVICE;
-          onSubmit({
+          const payload: ProductWriteInput & { type: ProductType; unit: Unit; name: string } = {
             name: name.trim(),
-            type,
+            type: effectiveType,
             unit: Unit.PIECE,
             description: description.trim() || null,
-            purchasePrice: isService ? purchasePrice.trim() || null : null,
+            purchasePrice: effectiveType === ProductType.SERVICE ? purchasePrice.trim() || null : null,
             salePrice: salePrice.trim() || null,
-          });
+          };
+          if (isFlower) {
+            payload.flowerKind = attrSelectionToRef(flowerKind);
+            payload.flowerForm = attrSelectionToRef(flowerForm);
+            payload.variety = attrSelectionToRef(variety);
+            payload.color = attrSelectionToRef(color);
+            payload.origin = attrSelectionToRef(origin);
+            payload.stemLengthCm = stem;
+            payload.imageIds = images.map((img) => img.id);
+            payload.primaryImageId = primaryImageId;
+          }
+          onSubmit(payload);
         }}
       >
         <div className="space-y-2">
-          <Label htmlFor="product-name">Название *</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="product-name">Название *</Label>
+            {isFlower && suggestedName.length >= 2 && name.trim() !== suggestedName ? (
+              <button
+                type="button"
+                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => {
+                  setName(suggestedName);
+                  setNameTouched(true);
+                }}
+              >
+                Подставить: {suggestedName}
+              </button>
+            ) : null}
+          </div>
           <Input
             id="product-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setNameTouched(true);
+            }}
             required
           />
         </div>
@@ -890,6 +1025,94 @@ function ProductFormDialog({
             (нельзя изменить)
           </p>
         )}
+
+        {isFlower ? (
+          <div className="space-y-4 rounded-[24px] border border-border/80 bg-muted/20 p-4">
+            <p className="text-sm font-medium">Характеристики цветка</p>
+            {kindWarning ? (
+              <p className="rounded-2xl bg-warn-soft px-3 py-2 text-sm text-warn-fg">{kindWarning}</p>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Вид</Label>
+                <CreatableAttrSelect
+                  kind={ProductAttrKind.FLOWER_KIND}
+                  value={flowerKind}
+                  onChange={onKindChange}
+                  placeholder="Например, Роза"
+                  ariaLabel="Вид цветка"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Форма / тип</Label>
+                <CreatableAttrSelect
+                  kind={ProductAttrKind.FLOWER_FORM}
+                  parentId={kindParentId}
+                  dependsOnParent
+                  value={flowerForm}
+                  onChange={setFlowerForm}
+                  placeholder="Одноголовая, кустовая…"
+                  ariaLabel="Форма цветка"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Сорт</Label>
+                <CreatableAttrSelect
+                  kind={ProductAttrKind.VARIETY}
+                  parentId={kindParentId}
+                  dependsOnParent
+                  value={variety}
+                  onChange={setVariety}
+                  placeholder="Например, Мондиаль"
+                  ariaLabel="Сорт"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Цвет</Label>
+                <CreatableAttrSelect
+                  kind={ProductAttrKind.COLOR}
+                  value={color}
+                  onChange={setColor}
+                  placeholder="Например, белая"
+                  ariaLabel="Цвет"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Происхождение</Label>
+                <CreatableAttrSelect
+                  kind={ProductAttrKind.ORIGIN}
+                  value={origin}
+                  onChange={setOrigin}
+                  placeholder="Необязательно"
+                  ariaLabel="Происхождение"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="product-stem">Длина стебля, см</Label>
+                <Input
+                  id="product-stem"
+                  inputMode="numeric"
+                  placeholder="50"
+                  value={stemLengthCm}
+                  onChange={(e) => setStemLengthCm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Фотографии</Label>
+              <ProductImageUploader
+                images={images}
+                primaryImageId={primaryImageId}
+                disabled={pending}
+                onChange={({ images: nextImages, primaryImageId: nextPrimary }) => {
+                  setImages(nextImages);
+                  setPrimaryImageId(nextPrimary);
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+
         <div className={cn('grid gap-4', showPurchasePrice ? 'sm:grid-cols-2' : '')}>
           {showPurchasePrice ? (
             <div className="space-y-2">

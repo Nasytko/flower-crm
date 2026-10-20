@@ -57,7 +57,9 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 nodejs \
-  && useradd --system --uid 1001 --gid nodejs nestjs
+  && useradd --system --uid 1001 --gid nodejs nestjs \
+  && mkdir -p /app/uploads/product-images \
+  && chown -R nestjs:nodejs /app/uploads
 
 COPY --from=pruned --chown=nestjs:nodejs /app/deployed ./
 

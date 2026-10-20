@@ -66,4 +66,9 @@ export class AppConfigService {
   get yandexSuggestLl(): string | undefined {
     return this.configService.get('YANDEX_SUGGEST_LL', { infer: true });
   }
+
+  /** Directory for uploaded product images (created on demand). */
+  get uploadsDir(): string {
+    return this.configService.get('UPLOADS_DIR', { infer: true });
+  }
 }

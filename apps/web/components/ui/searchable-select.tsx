@@ -68,6 +68,10 @@ export function SearchableSelect({
   disabled = false,
   searchable = true,
   clearable = false,
+  /** When set, shows «+ Добавить …» for the current query if no exact match. */
+  creatable = false,
+  onCreate,
+  createLabel,
   className,
   triggerClassName,
   ariaLabel,
@@ -81,6 +85,11 @@ export function SearchableSelect({
   disabled?: boolean;
   searchable?: boolean;
   clearable?: boolean;
+  creatable?: boolean;
+  /** Called with trimmed query when user confirms create. */
+  onCreate?: (label: string) => void;
+  /** Override create row label; receives the trimmed query. */
+  createLabel?: (query: string) => string;
   className?: string;
   triggerClassName?: string;
   ariaLabel?: string;
@@ -110,6 +119,18 @@ export function SearchableSelect({
       return haystack.includes(q);
     });
   }, [options, query]);
+
+  const trimmedQuery = query.trim();
+  const canCreate = Boolean(
+    creatable &&
+      onCreate &&
+      trimmedQuery.length > 0 &&
+      !options.some(
+        (option) => option.label.trim().toLocaleLowerCase('ru-RU') === trimmedQuery.toLocaleLowerCase('ru-RU'),
+      ),
+  );
+  const createRowLabel =
+    createLabel?.(trimmedQuery) ?? `+ Добавить «${trimmedQuery}»`;
 
   const groups = useMemo(() => {
     const map = new Map<string | null, SelectOption[]>();
@@ -224,15 +245,30 @@ export function SearchableSelect({
     }
   };
 
+  const createHighlightIndex = canCreate ? flatEnabled.length : -1;
+  const maxHighlight = canCreate
+    ? Math.max(flatEnabled.length, 0)
+    : Math.max(flatEnabled.length - 1, 0);
+
+  const confirmCreate = () => {
+    if (!canCreate || !onCreate) return;
+    onCreate(trimmedQuery);
+    close();
+  };
+
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setHighlight((current) => Math.min(current + 1, Math.max(flatEnabled.length - 1, 0)));
+      setHighlight((current) => Math.min(current + 1, maxHighlight));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setHighlight((current) => Math.max(current - 1, 0));
     } else if (event.key === 'Enter') {
       event.preventDefault();
+      if (canCreate && highlight === createHighlightIndex) {
+        confirmCreate();
+        return;
+      }
       const option = flatEnabled[highlight];
       if (option) pick(option);
     }
@@ -282,7 +318,7 @@ export function SearchableSelect({
                 </button>
               ) : null}
 
-              {filtered.length === 0 ? (
+              {filtered.length === 0 && !canCreate ? (
                 <p className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText}</p>
               ) : (
                 groups.map(([group, groupOptions]) => (
@@ -342,6 +378,24 @@ export function SearchableSelect({
                   </div>
                 ))
               )}
+
+              {canCreate ? (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onMouseEnter={() => setHighlight(createHighlightIndex)}
+                  onClick={confirmCreate}
+                  className={cn(
+                    'mt-1 flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors',
+                    highlight === createHighlightIndex
+                      ? 'bg-primary-soft'
+                      : 'active:bg-muted/80 hover:bg-muted/70',
+                  )}
+                >
+                  {createRowLabel}
+                </button>
+              ) : null}
             </div>
           </div>,
           document.body,

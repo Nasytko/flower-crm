@@ -124,4 +124,44 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
   return JSON.parse(text) as T;
 }
 
+/**
+ * Authenticated fetch for binary / multipart responses.
+ * Does not force Content-Type (required for FormData uploads).
+ */
+export async function apiFetchRaw(
+  path: string,
+  init: RequestInit = {},
+  retry = true,
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (!headers.has('Accept')) {
+    headers.set('Accept', '*/*');
+  }
+
+  const token = getAccessToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  if (init.body instanceof FormData) {
+    headers.delete('Content-Type');
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+
+  if (response.status === 401 && retry && !path.startsWith('/api/v1/auth/login')) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return apiFetchRaw(path, init, false);
+    }
+    onUnauthorized();
+  }
+
+  return response;
+}
+
 export { API_BASE };

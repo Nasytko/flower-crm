@@ -141,11 +141,26 @@ describe('ProductsService write-off (unit)', () => {
   const audit = { log: jest.fn() };
   const warehouseLock = { beginStockMutation: jest.fn().mockResolvedValue(undefined) };
   const stockFifo = { consumeLots: jest.fn() };
+  const productImages = {
+    syncProductImages: jest.fn().mockResolvedValue(undefined),
+    toDto: jest.fn((row: { id: string }) => ({
+      id: row.id,
+      mimeType: 'image/webp',
+      byteSize: 0,
+      width: null,
+      height: null,
+      sortOrder: 0,
+      url: `/api/v1/product-images/${row.id}`,
+      thumbUrl: `/api/v1/product-images/${row.id}?variant=thumb`,
+      isPrimary: false,
+    })),
+  };
   const service = new ProductsService(
     prismaMock as never,
     audit as never,
     warehouseLock as never,
     stockFifo as never,
+    productImages as never,
   );
   const actor = {
     id: 'u1',

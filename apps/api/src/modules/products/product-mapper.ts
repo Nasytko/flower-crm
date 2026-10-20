@@ -1,5 +1,13 @@
 import { Prisma } from '@erp/database';
-import { ProductType, type ProductListItem, type ProductStockDto } from '@erp/shared';
+import {
+  ProductAttrKind,
+  ProductType,
+  type ProductAttributeValueDto,
+  type ProductImageDto,
+  type ProductListItem,
+  type ProductStockDto,
+} from '@erp/shared';
+import type { ProductImagesService } from './product-images.service';
 
 export function decimalToMoneyString(value: Prisma.Decimal | null | undefined): string | null {
   if (value === null || value === undefined) {
@@ -92,6 +100,43 @@ export function computeMinMaxPurchaseCost(
   };
 }
 
+type AttrRow = {
+  id: string;
+  kind: string;
+  name: string;
+  parentId: string | null;
+  parentKey: string;
+} | null;
+
+type ImageRow = {
+  id: string;
+  mimeType: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  sortOrder: number;
+};
+
+function toAttrDto(row: AttrRow): ProductAttributeValueDto | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind as ProductAttrKind,
+    name: row.name,
+    parentId: row.parentId,
+    parentKey: row.parentKey,
+  };
+}
+
+export const productFlowerInclude = {
+  flowerKind: true,
+  flowerForm: true,
+  variety: true,
+  color: true,
+  origin: true,
+  images: { orderBy: { sortOrder: 'asc' as const } },
+} as const;
+
 export function toPublicProduct(
   product: {
     id: string;
@@ -105,10 +150,27 @@ export function toPublicProduct(
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
+    flowerKindId?: string | null;
+    flowerFormId?: string | null;
+    varietyId?: string | null;
+    colorId?: string | null;
+    originId?: string | null;
+    stemLengthCm?: number | null;
+    primaryImageId?: string | null;
+    flowerKind?: AttrRow;
+    flowerForm?: AttrRow;
+    variety?: AttrRow;
+    color?: AttrRow;
+    origin?: AttrRow;
+    images?: ImageRow[];
     stock?: { quantityOnHand: number; quantityReserved: number } | null;
     lots?: Array<{ remainingQuantity: number; unitPurchasePrice: Prisma.Decimal | null }>;
   },
-  options: { includePurchasePrice: boolean; supplyCount?: number },
+  options: {
+    includePurchasePrice: boolean;
+    supplyCount?: number;
+    imagesService?: Pick<ProductImagesService, 'toDto'>;
+  },
 ): ProductListItem {
   const type = product.type as ProductType;
   const base: ProductListItem = {
@@ -124,6 +186,44 @@ export function toPublicProduct(
     createdAt: product.createdAt.toISOString(),
     updatedAt: product.updatedAt.toISOString(),
   };
+
+  if (type === ProductType.FLOWER) {
+    base.flowerKindId = product.flowerKindId ?? null;
+    base.flowerFormId = product.flowerFormId ?? null;
+    base.varietyId = product.varietyId ?? null;
+    base.colorId = product.colorId ?? null;
+    base.originId = product.originId ?? null;
+    base.stemLengthCm = product.stemLengthCm ?? null;
+    base.primaryImageId = product.primaryImageId ?? null;
+    base.flowerKind = toAttrDto(product.flowerKind ?? null);
+    base.flowerForm = toAttrDto(product.flowerForm ?? null);
+    base.variety = toAttrDto(product.variety ?? null);
+    base.color = toAttrDto(product.color ?? null);
+    base.origin = toAttrDto(product.origin ?? null);
+
+    const imagesService = options.imagesService;
+    if (product.images && imagesService) {
+      base.images = product.images.map((img) =>
+        imagesService.toDto(img, product.primaryImageId ?? null),
+      );
+    } else if (product.images) {
+      base.images = product.images.map(
+        (img): ProductImageDto => ({
+          id: img.id,
+          mimeType: img.mimeType,
+          byteSize: img.byteSize,
+          width: img.width,
+          height: img.height,
+          sortOrder: img.sortOrder,
+          url: `/api/v1/product-images/${img.id}`,
+          thumbUrl: `/api/v1/product-images/${img.id}?variant=thumb`,
+          isPrimary: product.primaryImageId === img.id,
+        }),
+      );
+    } else {
+      base.images = [];
+    }
+  }
 
   if (type === ProductType.FLOWER && options.supplyCount !== undefined) {
     base.supplyCount = options.supplyCount;

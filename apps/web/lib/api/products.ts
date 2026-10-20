@@ -1,4 +1,5 @@
 import type {
+  ProductAttrRefInput,
   ProductListItem,
   ProductListResult,
   ProductType,
@@ -16,6 +17,26 @@ export interface ProductListParams {
   limit?: number;
 }
 
+export interface ProductWriteInput {
+  name: string;
+  sku?: string | null;
+  type?: ProductType;
+  description?: string | null;
+  unit?: Unit;
+  purchasePrice?: string | null;
+  salePrice?: string | null;
+  isActive?: boolean;
+  flowerKind?: ProductAttrRefInput | null;
+  flowerForm?: ProductAttrRefInput | null;
+  variety?: ProductAttrRefInput | null;
+  color?: ProductAttrRefInput | null;
+  origin?: ProductAttrRefInput | null;
+  stemLengthCm?: number | null;
+  imageIds?: string[];
+  primaryImageId?: string | null;
+  removeImageIds?: string[];
+}
+
 export async function listProducts(params: ProductListParams = {}): Promise<ProductListResult> {
   const query = new URLSearchParams();
   if (params.search) query.set('search', params.search);
@@ -31,15 +52,9 @@ export async function getProduct(id: string): Promise<ProductListItem> {
   return apiFetch<ProductListItem>(`/api/v1/products/${id}`);
 }
 
-export async function createProduct(input: {
-  name: string;
-  sku?: string | null;
-  type: ProductType;
-  description?: string | null;
-  unit: Unit;
-  purchasePrice?: string | null;
-  salePrice?: string | null;
-}): Promise<ProductListItem> {
+export async function createProduct(
+  input: ProductWriteInput & { type: ProductType; unit: Unit; name: string },
+): Promise<ProductListItem> {
   return apiFetch<ProductListItem>('/api/v1/products', {
     method: 'POST',
     body: JSON.stringify(input),
@@ -48,14 +63,7 @@ export async function createProduct(input: {
 
 export async function updateProduct(
   id: string,
-  input: Partial<{
-    name: string;
-    sku: string | null;
-    description: string | null;
-    purchasePrice: string | null;
-    salePrice: string | null;
-    isActive: boolean;
-  }>,
+  input: Partial<ProductWriteInput>,
 ): Promise<ProductListItem> {
   return apiFetch<ProductListItem>(`/api/v1/products/${id}`, {
     method: 'PATCH',

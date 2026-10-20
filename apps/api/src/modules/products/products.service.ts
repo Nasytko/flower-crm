@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   AuditAction,
   Permission,
+  ProductAttrKind,
   ProductType,
   Role,
   StockMovementType,
@@ -21,12 +22,15 @@ import { WarehouseLockService } from '../warehouse/warehouse-lock.service';
 import { StockFifoService } from '../warehouse/stock-fifo.service';
 import {
   CreateProductDto,
+  ProductAttrRefDto,
   ProductQueryDto,
   StockMovementsQueryDto,
   UpdateProductDto,
   WriteOffStockDto,
 } from './dto/product.dto';
-import { parseMoneyInput, toPublicProduct } from './product-mapper';
+import { resolveAttrRef } from './product-attr.util';
+import { ProductImagesService } from './product-images.service';
+import { parseMoneyInput, productFlowerInclude, toPublicProduct } from './product-mapper';
 import { buildSkuBaseFromName, nextUniqueSku } from './sku';
 
 const productInclude = {
@@ -35,6 +39,7 @@ const productInclude = {
     where: { remainingQuantity: { gt: 0 }, reversedAt: null },
     select: { remainingQuantity: true, unitPurchasePrice: true },
   },
+  ...productFlowerInclude,
 } as const;
 
 @Injectable()
@@ -44,6 +49,7 @@ export class ProductsService {
     private readonly audit: AuditService,
     private readonly warehouseLock: WarehouseLockService,
     private readonly stockFifo: StockFifoService,
+    private readonly productImages: ProductImagesService,
   ) {}
 
   async list(actor: AuthenticatedUser, query: ProductQueryDto): Promise<ProductListResult> {
@@ -56,7 +62,9 @@ export class ProductsService {
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
         where,
-        include: includePurchasePrice ? productInclude : { stock: true },
+        include: includePurchasePrice
+          ? productInclude
+          : { stock: true, ...productFlowerInclude },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
@@ -70,6 +78,7 @@ export class ProductsService {
         toPublicProduct(row, {
           includePurchasePrice,
           supplyCount: supplyCounts.get(row.id) ?? 0,
+          imagesService: this.productImages,
         }),
       ),
       total,
@@ -82,7 +91,9 @@ export class ProductsService {
     const includePurchasePrice = this.canViewPurchasePrice(actor);
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: includePurchasePrice ? productInclude : { stock: true },
+      include: includePurchasePrice
+        ? productInclude
+        : { stock: true, ...productFlowerInclude },
     });
     if (!product) {
       throw new AppError('PRODUCT_NOT_FOUND', 'Товар не найден', {}, HttpStatus.NOT_FOUND);
@@ -91,6 +102,7 @@ export class ProductsService {
     return toPublicProduct(product, {
       includePurchasePrice,
       supplyCount: supplyCounts.get(id) ?? 0,
+      imagesService: this.productImages,
     });
   }
 
@@ -114,6 +126,18 @@ export class ProductsService {
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const sku = await this.allocateSku(tx, dto.name.trim());
+        const flowerFields =
+          dto.type === ProductType.FLOWER
+            ? await this.resolveFlowerFields(tx, dto)
+            : {
+                flowerKindId: null,
+                flowerFormId: null,
+                varietyId: null,
+                colorId: null,
+                originId: null,
+                stemLengthCm: null,
+              };
+
         const product = await tx.product.create({
           data: {
             name: dto.name.trim(),
@@ -123,6 +147,7 @@ export class ProductsService {
             unit: dto.unit,
             purchasePrice,
             salePrice,
+            ...flowerFields,
           },
         });
 
@@ -133,6 +158,10 @@ export class ProductsService {
               quantityOnHand: 0,
               quantityReserved: 0,
             },
+          });
+          await this.productImages.syncProductImages(tx, product.id, {
+            imageIds: dto.imageIds,
+            primaryImageId: dto.primaryImageId,
           });
         }
 
@@ -146,7 +175,11 @@ export class ProductsService {
           actorUserId: actor.id,
           entityType: 'Product',
           entityId: product.id,
-          after: toPublicProduct(full, { includePurchasePrice: true, supplyCount: 0 }),
+          after: toPublicProduct(full, {
+            includePurchasePrice: true,
+            supplyCount: 0,
+            imagesService: this.productImages,
+          }),
           context,
           tx,
         });
@@ -157,6 +190,7 @@ export class ProductsService {
       return toPublicProduct(created, {
         includePurchasePrice: this.canViewPurchasePrice(actor),
         supplyCount: 0,
+        imagesService: this.productImages,
       });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
@@ -204,7 +238,19 @@ export class ProductsService {
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
-        const product = await tx.product.update({
+        const flowerPatch =
+          current.type === ProductType.FLOWER
+            ? await this.resolveFlowerFieldsPatch(tx, dto, {
+                flowerKindId: current.flowerKindId,
+                flowerFormId: current.flowerFormId,
+                varietyId: current.varietyId,
+                colorId: current.colorId,
+                originId: current.originId,
+                stemLengthCm: current.stemLengthCm,
+              })
+            : {};
+
+        await tx.product.update({
           where: { id },
           data: {
             ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -215,7 +261,20 @@ export class ProductsService {
             ...(purchasePrice !== undefined ? { purchasePrice } : {}),
             ...(salePrice !== undefined ? { salePrice } : {}),
             ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+            ...flowerPatch,
           },
+        });
+
+        if (current.type === ProductType.FLOWER) {
+          await this.productImages.syncProductImages(tx, id, {
+            imageIds: dto.imageIds,
+            primaryImageId: dto.primaryImageId,
+            removeImageIds: dto.removeImageIds,
+          });
+        }
+
+        const product = await tx.product.findUniqueOrThrow({
+          where: { id },
           include: productInclude,
         });
 
@@ -231,8 +290,14 @@ export class ProductsService {
           actorUserId: actor.id,
           entityType: 'Product',
           entityId: id,
-          before: toPublicProduct(current, { includePurchasePrice: true }),
-          after: toPublicProduct(product, { includePurchasePrice: true }),
+          before: toPublicProduct(current, {
+            includePurchasePrice: true,
+            imagesService: this.productImages,
+          }),
+          after: toPublicProduct(product, {
+            includePurchasePrice: true,
+            imagesService: this.productImages,
+          }),
           context,
           tx,
         });
@@ -244,6 +309,7 @@ export class ProductsService {
       return toPublicProduct(updated, {
         includePurchasePrice: this.canViewPurchasePrice(actor),
         supplyCount: supplyCounts.get(id) ?? 0,
+        imagesService: this.productImages,
       });
     } catch (error) {
       if (this.isUniqueViolation(error)) {
@@ -540,5 +606,123 @@ export class ProductsService {
       'code' in error &&
       (error as { code?: string }).code === 'P2002'
     );
+  }
+
+  private async resolveFlowerFields(
+    tx: Prisma.TransactionClient,
+    dto: {
+      flowerKind?: ProductAttrRefDto | null;
+      flowerForm?: ProductAttrRefDto | null;
+      variety?: ProductAttrRefDto | null;
+      color?: ProductAttrRefDto | null;
+      origin?: ProductAttrRefDto | null;
+      stemLengthCm?: number | null;
+    },
+  ): Promise<{
+    flowerKindId: string | null;
+    flowerFormId: string | null;
+    varietyId: string | null;
+    colorId: string | null;
+    originId: string | null;
+    stemLengthCm: number | null;
+  }> {
+    const flowerKindId = await resolveAttrRef(
+      tx,
+      ProductAttrKind.FLOWER_KIND,
+      dto.flowerKind ?? null,
+      null,
+    );
+    const flowerFormId = await resolveAttrRef(
+      tx,
+      ProductAttrKind.FLOWER_FORM,
+      dto.flowerForm ?? null,
+      flowerKindId,
+    );
+    const varietyId = await resolveAttrRef(
+      tx,
+      ProductAttrKind.VARIETY,
+      dto.variety ?? null,
+      flowerKindId,
+    );
+    const colorId = await resolveAttrRef(tx, ProductAttrKind.COLOR, dto.color ?? null, null);
+    const originId = await resolveAttrRef(tx, ProductAttrKind.ORIGIN, dto.origin ?? null, null);
+
+    return {
+      flowerKindId,
+      flowerFormId,
+      varietyId,
+      colorId,
+      originId,
+      stemLengthCm: dto.stemLengthCm ?? null,
+    };
+  }
+
+  private async resolveFlowerFieldsPatch(
+    tx: Prisma.TransactionClient,
+    dto: UpdateProductDto,
+    current: {
+      flowerKindId: string | null;
+      flowerFormId: string | null;
+      varietyId: string | null;
+      colorId: string | null;
+      originId: string | null;
+      stemLengthCm: number | null;
+    },
+  ): Promise<Record<string, string | number | null>> {
+    const patch: Record<string, string | number | null> = {};
+
+    const kindTouched = dto.flowerKind !== undefined;
+    const formTouched = dto.flowerForm !== undefined;
+    const varietyTouched = dto.variety !== undefined;
+
+    let nextKindId = current.flowerKindId;
+    if (kindTouched) {
+      nextKindId = await resolveAttrRef(tx, ProductAttrKind.FLOWER_KIND, dto.flowerKind, null);
+      patch.flowerKindId = nextKindId;
+    }
+
+    if (formTouched) {
+      patch.flowerFormId = await resolveAttrRef(
+        tx,
+        ProductAttrKind.FLOWER_FORM,
+        dto.flowerForm,
+        nextKindId,
+      );
+    } else if (kindTouched && current.flowerFormId) {
+      const form = await tx.productAttributeValue.findUnique({
+        where: { id: current.flowerFormId },
+      });
+      if (!form || form.parentKey !== (nextKindId ?? '')) {
+        patch.flowerFormId = null;
+      }
+    }
+
+    if (varietyTouched) {
+      patch.varietyId = await resolveAttrRef(
+        tx,
+        ProductAttrKind.VARIETY,
+        dto.variety,
+        nextKindId,
+      );
+    } else if (kindTouched && current.varietyId) {
+      const variety = await tx.productAttributeValue.findUnique({
+        where: { id: current.varietyId },
+      });
+      if (!variety || variety.parentKey !== (nextKindId ?? '')) {
+        patch.varietyId = null;
+      }
+    }
+
+    if (dto.color !== undefined) {
+      patch.colorId = await resolveAttrRef(tx, ProductAttrKind.COLOR, dto.color, null);
+    }
+    if (dto.origin !== undefined) {
+      patch.originId = await resolveAttrRef(tx, ProductAttrKind.ORIGIN, dto.origin, null);
+    }
+    if (dto.stemLengthCm !== undefined) {
+      patch.stemLengthCm = dto.stemLengthCm;
+    }
+
+    return patch;
   }
 }

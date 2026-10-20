@@ -35,7 +35,7 @@ describe('Phase 9 order completion rollback (live DB)', () => {
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
   const reservationAllocation = new ReservationAllocationService(audit);
-  const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo);
+  const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, { syncProductImages: async () => undefined, toDto: (row: { id: string }) => ({ id: row.id, mimeType: "image/webp", byteSize: 0, width: null, height: null, sortOrder: 0, url: "", thumbUrl: "", isPrimary: false }) } as never);
   const supplies = new SuppliesService(
     prisma as never,
     audit,

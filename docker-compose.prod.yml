@@ -92,6 +92,9 @@ services:
       BUSINESS_TIME_ZONE: ${BUSINESS_TIME_ZONE:-Europe/Minsk}
       YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
       YANDEX_SUGGEST_LL: ${YANDEX_SUGGEST_LL:-}
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     ports:
       - '127.0.0.1:${ERP_API_PORT:-3101}:3001'
     depends_on:
@@ -152,6 +155,8 @@ services:
 volumes:
   postgres_data:
     name: erpbuket1_postgres_data
+  uploads_data:
+    name: erpbuket1_uploads_data
 
 networks:
   internal:

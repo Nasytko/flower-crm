@@ -7,6 +7,7 @@ import {
   type SelectOption,
   type SelectOptionBadge,
 } from '@/components/ui/searchable-select';
+import { ProductThumb } from '@/components/ui/product-image';
 
 export function ProductPicker({
   products,
@@ -35,6 +36,9 @@ export function ProductPicker({
   ariaLabel?: string;
 }): ReactElement {
   const reserved = useMemo(() => new Set(reservedIds ?? []), [reservedIds]);
+  const selected = products.find((p) => p.id === value);
+  const primaryImage =
+    selected?.images?.find((i) => i.isPrimary) ?? selected?.images?.[0] ?? null;
 
   const options = useMemo<SelectOption[]>(() => {
     const sorted = [...products].sort((a, b) => {
@@ -67,12 +71,18 @@ export function ProductPicker({
       if (product.type === ProductType.SERVICE) {
         details.push('Услуга · без складского остатка');
       }
+      const attrs: string[] = [];
+      if (product.flowerKind?.name) attrs.push(product.flowerKind.name);
+      if (product.variety?.name) attrs.push(product.variety.name);
+      if (product.color?.name) attrs.push(product.color.name);
+      if (product.stemLengthCm) attrs.push(`${product.stemLengthCm} см`);
+      if (attrs.length) details.push(attrs.join(' · '));
 
       return {
         value: product.id,
         label: product.name,
         description: details.join(' · ') || undefined,
-        keywords: `${product.sku ?? ''} ${PRODUCT_TYPE_LABELS_RU[product.type]}`,
+        keywords: `${product.sku ?? ''} ${PRODUCT_TYPE_LABELS_RU[product.type]} ${attrs.join(' ')}`,
         group: product.type === ProductType.FLOWER ? 'Цветы' : 'Услуги',
         disabled: isReserved || (!product.isActive && product.id !== value),
         badges,
@@ -81,17 +91,28 @@ export function ProductPicker({
   }, [products, reserved, reservedLabel, showStock, value]);
 
   return (
-    <SearchableSelect
-      value={value}
-      onChange={onChange}
-      options={options}
-      disabled={disabled}
-      placeholder={placeholder}
-      searchPlaceholder={searchPlaceholder}
-      emptyText="Нет подходящих товаров"
-      className={className}
-      ariaLabel={ariaLabel ?? placeholder}
-      clearable={false}
-    />
+    <div className="flex items-start gap-2">
+      {selected?.type === ProductType.FLOWER ? (
+        <ProductThumb
+          image={primaryImage}
+          fallback="✿"
+          size="sm"
+          enableHoverPreview
+          className="mt-1"
+        />
+      ) : null}
+      <SearchableSelect
+        value={value}
+        onChange={onChange}
+        options={options}
+        disabled={disabled}
+        placeholder={placeholder}
+        searchPlaceholder={searchPlaceholder}
+        emptyText="Нет подходящих товаров"
+        className={className ?? 'min-w-0 flex-1'}
+        ariaLabel={ariaLabel ?? placeholder}
+        clearable={false}
+      />
+    </div>
   );
 }

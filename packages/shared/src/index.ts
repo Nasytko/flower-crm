@@ -218,6 +218,15 @@ export enum ProductType {
   SERVICE = 'SERVICE',
 }
 
+/** Controlled vocabulary kinds for FLOWER product characteristics. */
+export enum ProductAttrKind {
+  FLOWER_KIND = 'FLOWER_KIND',
+  FLOWER_FORM = 'FLOWER_FORM',
+  VARIETY = 'VARIETY',
+  COLOR = 'COLOR',
+  ORIGIN = 'ORIGIN',
+}
+
 export enum Unit {
   PIECE = 'PIECE',
 }
@@ -256,9 +265,51 @@ export const PRODUCT_TYPE_LABELS_RU: Record<ProductType, string> = {
   [ProductType.SERVICE]: 'Услуга',
 };
 
+export const PRODUCT_ATTR_KIND_LABELS_RU: Record<ProductAttrKind, string> = {
+  [ProductAttrKind.FLOWER_KIND]: 'Вид',
+  [ProductAttrKind.FLOWER_FORM]: 'Форма / тип',
+  [ProductAttrKind.VARIETY]: 'Сорт',
+  [ProductAttrKind.COLOR]: 'Цвет',
+  [ProductAttrKind.ORIGIN]: 'Происхождение',
+};
+
 export const UNIT_LABELS_RU: Record<Unit, string> = {
   [Unit.PIECE]: 'шт.',
 };
+
+/** Normalize attribute label for uniqueness (trim, collapse spaces, casefold). */
+export function normalizeProductAttrName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru-RU');
+}
+
+/**
+ * Suggest a display name from flower characteristics.
+ * Example: «Роза Мондиаль белая 50 см». Does not overwrite existing names.
+ */
+export function suggestFlowerProductName(parts: {
+  kindName?: string | null;
+  formName?: string | null;
+  varietyName?: string | null;
+  colorName?: string | null;
+  stemLengthCm?: number | null;
+}): string {
+  const chunks: string[] = [];
+  const kind = parts.kindName?.trim();
+  const form = parts.formName?.trim();
+  const variety = parts.varietyName?.trim();
+  const color = parts.colorName?.trim();
+  const stem =
+    parts.stemLengthCm != null && Number.isFinite(parts.stemLengthCm) && parts.stemLengthCm > 0
+      ? `${Math.round(parts.stemLengthCm)} см`
+      : null;
+
+  if (kind) chunks.push(kind);
+  if (form) chunks.push(form);
+  if (variety) chunks.push(variety);
+  if (color) chunks.push(color);
+  if (stem) chunks.push(stem);
+  return chunks.join(' ').trim();
+}
 
 export const STOCK_MOVEMENT_TYPE_LABELS_RU: Record<StockMovementType, string> = {
   [StockMovementType.SUPPLY]: 'Поставка',
@@ -293,6 +344,34 @@ export interface ProductStockDto {
   availableQuantity: number;
 }
 
+export interface ProductAttributeValueDto {
+  id: string;
+  kind: ProductAttrKind;
+  name: string;
+  parentId: string | null;
+  parentKey: string;
+}
+
+/** Create-or-get reference: existing id and/or draft name resolved on product save. */
+export interface ProductAttrRefInput {
+  id?: string | null;
+  name?: string | null;
+}
+
+export interface ProductImageDto {
+  id: string;
+  mimeType: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  sortOrder: number;
+  /** Authenticated image URL (full). */
+  url: string;
+  /** Authenticated thumbnail URL. */
+  thumbUrl: string;
+  isPrimary: boolean;
+}
+
 export interface ProductListItem {
   id: string;
   name: string;
@@ -318,6 +397,20 @@ export interface ProductListItem {
   salePrice: MoneyString | null;
   isActive: boolean;
   stock: ProductStockDto | null;
+  /** FLOWER-only; null/omitted for SERVICE. */
+  flowerKindId?: string | null;
+  flowerFormId?: string | null;
+  varietyId?: string | null;
+  colorId?: string | null;
+  originId?: string | null;
+  stemLengthCm?: number | null;
+  flowerKind?: ProductAttributeValueDto | null;
+  flowerForm?: ProductAttributeValueDto | null;
+  variety?: ProductAttributeValueDto | null;
+  color?: ProductAttributeValueDto | null;
+  origin?: ProductAttributeValueDto | null;
+  primaryImageId?: string | null;
+  images?: ProductImageDto[];
   createdAt: string;
   updatedAt: string;
 }
