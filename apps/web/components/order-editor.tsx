@@ -9,6 +9,7 @@ import {
   FulfillmentType,
   FULFILLMENT_TYPE_LABELS_RU,
   OrderItemType,
+  OrderSource,
   OrderStatus,
   Permission,
   ProductType,
@@ -394,6 +395,16 @@ export function OrderEditor({
       if (mode === 'create') {
         return createOrder(payload);
       }
+      // POS / composition-locked orders: header + discount only (never replace line snapshots).
+      const compositionLocked = initial!.source === OrderSource.POS;
+      if (compositionLocked) {
+        const { items: _omitItems, ...headerOnly } = payload;
+        void _omitItems;
+        return updateOrder(initial!.id, {
+          expectedVersion: version,
+          ...headerOnly,
+        });
+      }
       return updateOrder(initial!.id, {
         expectedVersion: version,
         ...payload,
@@ -627,7 +638,7 @@ export function OrderEditor({
       <section className="space-y-4 rounded-[28px] border border-border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Состав</h2>
-          {editable ? (
+          {editable && initial?.source !== OrderSource.POS ? (
             <Button
               type="button"
               variant="soft"
@@ -638,6 +649,12 @@ export function OrderEditor({
             </Button>
           ) : null}
         </div>
+        {mode === 'edit' && initial?.source === OrderSource.POS ? (
+          <p className="rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            Заказ из продаж: состав зафиксирован. Можно изменить контакты, дату и комментарий;
+            позиции — через кассу до подтверждения или через блок сборки/выдачи ниже.
+          </p>
+        ) : null}
 
         <div className="space-y-3">
           {lines.map((line, index) => {

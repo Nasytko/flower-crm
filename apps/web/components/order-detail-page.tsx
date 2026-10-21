@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FulfillmentType,
   FULFILLMENT_TYPE_LABELS_RU,
+  OrderPaymentStatus,
   OrderStatus,
   Permission,
   orderStatusLabelRu,
@@ -17,6 +18,7 @@ import { userFacingError } from '@/lib/api/error-messages';
 import { invalidateAfterOrderStatusChange } from '@/lib/query-invalidation';
 import { OrderEditor } from '@/components/order-editor';
 import { OrderAssemblySection } from '@/components/order-assembly-section';
+import { OrderProgress } from '@/components/order-progress';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PageHeader } from '@/components/ui/page-header';
@@ -198,6 +200,20 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
         <p className="rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
           Редактирование состава заказа доступно только в статусе «Новый». Сборка — в блоке ниже.
         </p>
+      ) : null}
+
+      <OrderProgress order={current} />
+
+      {current.paymentSummary.paymentStatus === OrderPaymentStatus.PAID &&
+      current.status !== OrderStatus.COMPLETED &&
+      current.status !== OrderStatus.CANCELLED ? (
+        <section className="rounded-[28px] border border-warn-fg/30 bg-warn-soft/50 px-5 py-4">
+          <h2 className="text-sm font-semibold text-warn-fg">Оплачено — завершите выдачу</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Деньги уже приняты. Повторная оплата не нужна. Выдайте букеты и товары в блоке «Сборка и
+            выдача» ниже (или повторите «Оплатить и выдать» в кассе — платёж не продублируется).
+          </p>
+        </section>
       ) : null}
 
       {requirements.length > 0 ? (

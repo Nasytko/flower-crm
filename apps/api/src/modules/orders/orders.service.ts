@@ -3,9 +3,13 @@ import {
   AuditAction,
   DiscountType,
   FulfillmentType,
+  OrderFulfillmentMode,
   OrderItemType,
+  OrderPaymentStatus,
+  OrderSource,
   OrderStatus,
   Permission,
+  PosPriceMode,
   ProductType,
   Role,
   AssembledBouquetStatus,
@@ -27,6 +31,9 @@ import { AppConfigService } from '../../config/app-config.service';
 import { WarehouseLockService } from '../warehouse/warehouse-lock.service';
 import { ReservationAllocationService } from '../warehouse/reservation-allocation.service';
 import { decimalToMoneyString, parseMoneyInput } from '../products/product-mapper';
+import { computeOrderPaymentSummary } from '../payments/payment-calc';
+import { paymentInclude, toPaymentDto } from '../payments/payment-mapper';
+import { buildFulfillmentProgress } from './order-progress';
 import {
   businessDateString,
   businessTimeHm,
@@ -65,6 +72,10 @@ const orderInclude = {
       order: { select: { number: true } },
     },
     orderBy: { assembledAt: 'desc' as const },
+  },
+  payments: {
+    include: paymentInclude,
+    orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
   },
   createdBy: { select: { id: true, name: true } },
   updatedBy: { select: { id: true, name: true } },
@@ -358,6 +369,26 @@ export class OrdersService {
           );
         }
 
+        const compositionLocked = this.isCompositionLocked(existing);
+        const wantsItemReplace = dto.items !== undefined;
+
+        // Header-only update: never delete/recreate lines (preserves POS snapshots & AB links).
+        if (!wantsItemReplace) {
+          return this.updateHeaderOnly(tx, actor, existing, dto, context);
+        }
+
+        if (compositionLocked) {
+          throw new AppError(
+            'ORDER_COMPOSITION_LOCKED',
+            'Состав этого заказа нельзя менять через форму заказа (индивидуальные букеты, услуги, привязанные готовые букеты или заказ из продаж). Измените заказ до подтверждения корзины или через складские операции.',
+            {
+              source: existing.source,
+              hasLinkedAssembled: existing.assembledBouquets.length > 0,
+            },
+            HttpStatus.CONFLICT,
+          );
+        }
+
         const merged = this.mergeUpdate(existing, dto);
         this.assertDiscountPermission(
           actor,
@@ -458,6 +489,7 @@ export class OrdersService {
             version: row.version,
             hasShortage: shortage.hasShortage,
             shortageProductCount: shortage.shortageProductCount,
+            mode: 'composition_replace',
           },
           context,
           tx,
@@ -474,6 +506,163 @@ export class OrdersService {
       businessTimeHm(now, this.config.businessTimeZone),
       actor,
     );
+  }
+
+  /** Orders whose line snapshot must not be delete-recreated. */
+  private isCompositionLocked(existing: OrderRow): boolean {
+    if ((existing.source as OrderSource | undefined) === OrderSource.POS) return true;
+    if (existing.assembledBouquets.length > 0) return true;
+    for (const item of existing.items) {
+      if (item.parentOrderItemId) return true;
+      if (item.itemType === OrderItemType.BOUQUET && !item.bouquetId) return true;
+      if (item.priceOverridden) return true;
+      if (item.lineDiscountAmount && !item.lineDiscountAmount.equals(0)) return true;
+      if ((item.assembledBouquets ?? []).length > 0) return true;
+    }
+    return false;
+  }
+
+  private async updateHeaderOnly(
+    tx: Tx,
+    actor: AuthenticatedUser,
+    existing: OrderRow,
+    dto: UpdateOrderDto,
+    context: RequestContext,
+  ): Promise<OrderRow> {
+    const id = existing.id;
+    // Recompute money only if cart-level discount fields change; keep line snapshots intact.
+    let discountType =
+      dto.discountType !== undefined
+        ? (dto.discountType as DiscountType | null)
+        : (existing.discountType as DiscountType | null);
+    let discountValue =
+      dto.discountValue !== undefined
+        ? dto.discountValue
+          ? parseMoneyInput(dto.discountValue)
+          : null
+        : existing.discountValue;
+    let discountAmount = existing.discountAmount;
+    let total = existing.total;
+    const subtotal = existing.subtotal;
+
+    if (dto.discountType !== undefined || dto.discountValue !== undefined) {
+      this.assertDiscountPermission(
+        actor,
+        discountType,
+        discountValue ? discountValue.toFixed(2) : null,
+        [],
+      );
+      discountAmount = new Prisma.Decimal(0);
+      if (discountType && discountValue) {
+        if (discountType === DiscountType.PERCENT) {
+          if (discountValue.lessThan(0) || discountValue.greaterThan(100)) {
+            throw new AppError(
+              'ORDER_INVALID_DISCOUNT',
+              'Процент скидки должен быть от 0 до 100',
+              {},
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          discountAmount = subtotal.mul(discountValue).div(100).toDecimalPlaces(2);
+        } else {
+          if (discountValue.greaterThan(subtotal)) {
+            throw new AppError(
+              'ORDER_INVALID_DISCOUNT',
+              'Скидка не может превышать сумму заказа',
+              {},
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          discountAmount = discountValue;
+        }
+      } else {
+        discountType = null;
+        discountValue = null;
+      }
+      total = subtotal.minus(discountAmount);
+      if (total.lessThan(0)) total = new Prisma.Decimal(0);
+    }
+
+    const before = this.auditSnapshot(existing);
+    const cas = await tx.order.updateMany({
+      where: { id, version: dto.expectedVersion, status: OrderStatus.NEW },
+      data: {
+        version: { increment: 1 },
+        customerName:
+          dto.customerName !== undefined ? (dto.customerName ?? '').trim() : existing.customerName,
+        customerPhone:
+          dto.customerPhone !== undefined
+            ? (dto.customerPhone ?? '').trim()
+            : existing.customerPhone,
+        fulfillmentType: (dto.fulfillmentType ?? existing.fulfillmentType) as FulfillmentType,
+        fulfillmentDate: dto.fulfillmentDate
+          ? parseIsoDateOnly(dto.fulfillmentDate)
+          : existing.fulfillmentDate,
+        fulfillmentTimeFrom:
+          dto.fulfillmentTimeFrom !== undefined
+            ? dto.fulfillmentTimeFrom
+            : existing.fulfillmentTimeFrom,
+        fulfillmentTimeTo:
+          dto.fulfillmentTimeTo !== undefined ? dto.fulfillmentTimeTo : existing.fulfillmentTimeTo,
+        recipientName: dto.recipientName !== undefined ? dto.recipientName : existing.recipientName,
+        recipientPhone:
+          dto.recipientPhone !== undefined ? dto.recipientPhone : existing.recipientPhone,
+        deliveryAddressText:
+          dto.deliveryAddressText !== undefined
+            ? dto.deliveryAddressText
+            : existing.deliveryAddressText,
+        deliveryLatitude:
+          dto.deliveryLatitude !== undefined
+            ? dto.deliveryLatitude
+            : existing.deliveryLatitude,
+        deliveryLongitude:
+          dto.deliveryLongitude !== undefined
+            ? dto.deliveryLongitude
+            : existing.deliveryLongitude,
+        deliveryProvider:
+          dto.deliveryProvider !== undefined ? dto.deliveryProvider : existing.deliveryProvider,
+        deliveryProviderPlaceId:
+          dto.deliveryProviderPlaceId !== undefined
+            ? dto.deliveryProviderPlaceId
+            : existing.deliveryProviderPlaceId,
+        deliveryComment:
+          dto.deliveryComment !== undefined ? dto.deliveryComment : existing.deliveryComment,
+        orderComment: dto.orderComment !== undefined ? dto.orderComment : existing.orderComment,
+        discountType,
+        discountValue,
+        discountAmount,
+        total,
+        updatedByUserId: actor.id,
+      },
+    });
+    if (cas.count === 0) {
+      const current = await tx.order.findUnique({ where: { id }, select: { version: true } });
+      throw new AppError(
+        'ORDER_CONFLICT',
+        'Заказ был изменён другим пользователем. Обновите страницу.',
+        { expectedVersion: dto.expectedVersion, currentVersion: current?.version },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const row = await tx.order.findUniqueOrThrow({ where: { id }, include: orderInclude });
+    await this.audit.log({
+      action: AuditAction.ORDER_UPDATED,
+      actorUserId: actor.id,
+      entityType: 'Order',
+      entityId: id,
+      before,
+      after: this.auditSnapshot(row),
+      metadata: {
+        number: row.number,
+        expectedVersion: dto.expectedVersion,
+        version: row.version,
+        mode: 'header_only',
+      },
+      context,
+      tx,
+    });
+    return row;
   }
 
   async changeStatus(
@@ -1172,7 +1361,29 @@ export class OrdersService {
     if (searchOr) {
       where.OR = searchOr;
     }
+    this.applyWalkInDefault(where, query);
     return where;
+  }
+
+  /**
+   * Kanban hides finished POS walk-in sales (they are receipts, not work to do) unless the
+   * caller explicitly asks (`includeWalkIn`, `source`), looks one up (`search`) or filters
+   * by `status=COMPLETED`. NEW / IN_PROGRESS / READY POS orders always stay visible.
+   */
+  private applyWalkInDefault(where: Prisma.OrderWhereInput, query: OrderQueryDto): void {
+    if (query.source) where.source = query.source;
+    if (query.includeWalkIn || query.source || query.search?.trim()) return;
+    if (query.status === OrderStatus.COMPLETED) return;
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        NOT: {
+          source: OrderSource.POS,
+          fulfillmentMode: OrderFulfillmentMode.WALK_IN,
+          status: OrderStatus.COMPLETED,
+        },
+      },
+    ];
   }
 
   private buildSearchOr(search: string | undefined): Prisma.OrderWhereInput[] | null {
@@ -1235,6 +1446,7 @@ export class OrdersService {
     if (searchOr) {
       where.OR = searchOr;
     }
+    this.applyWalkInDefault(where, query);
     return where;
   }
 
@@ -1325,6 +1537,9 @@ export class OrdersService {
       id: string;
       number: string;
       status: OrderStatus | string;
+      source?: OrderSource | string;
+      fulfillmentMode?: OrderFulfillmentMode | string;
+      paymentStatus?: OrderPaymentStatus | string;
       fulfillmentType: FulfillmentType | string;
       fulfillmentDate: Date;
       fulfillmentTimeFrom: string | null;
@@ -1351,6 +1566,11 @@ export class OrdersService {
       id: row.id,
       number: row.number,
       status,
+      source: (row.source as OrderSource | undefined) ?? OrderSource.BACKOFFICE,
+      fulfillmentMode:
+        (row.fulfillmentMode as OrderFulfillmentMode | undefined) ?? OrderFulfillmentMode.SCHEDULED,
+      paymentStatus:
+        (row.paymentStatus as OrderPaymentStatus | undefined) ?? OrderPaymentStatus.UNPAID,
       fulfillmentType: row.fulfillmentType as FulfillmentType,
       fulfillmentDate: isoDateFromDb(row.fulfillmentDate),
       fulfillmentTimeFrom: row.fulfillmentTimeFrom,
@@ -1428,6 +1648,7 @@ export class OrdersService {
     }
 
     const canSeeCost = canViewPurchasePrice;
+    const paymentSummary = computeOrderPaymentSummary(row.total, row.payments);
     const assembledBouquets = (row.assembledBouquets ?? []).map((b) => ({
       id: b.id,
       number: b.number,
@@ -1473,6 +1694,9 @@ export class OrdersService {
       items: row.items.map((item) => this.toItemDto(item)),
       requirements,
       assembledBouquets,
+      paymentSummary,
+      payments: row.payments.map((p) => toPaymentDto(p)),
+      fulfillmentProgress: buildFulfillmentProgress(row, paymentSummary),
     };
   }
 
@@ -1485,6 +1709,8 @@ export class OrdersService {
       unitSnapshot: c.unitSnapshot as Unit,
       quantityPerItem: c.quantityPerItem,
       totalQuantity: c.totalQuantity,
+      priceMode: (c.priceMode as PosPriceMode | undefined) ?? PosPriceMode.ADDITIONAL,
+      unitSalePriceSnapshot: decimalToMoneyString(c.unitSalePriceSnapshot),
       sortOrder: c.sortOrder,
     }));
     const itemType = item.itemType as OrderItemType;
@@ -1496,11 +1722,18 @@ export class OrdersService {
       itemType,
       productId: item.productId,
       bouquetId: item.bouquetId,
+      parentOrderItemId: item.parentOrderItemId ?? null,
+      priceMode: (item.priceMode as PosPriceMode | undefined) ?? PosPriceMode.ADDITIONAL,
       nameSnapshot: item.nameSnapshot,
       quantity: item.quantity,
       quantityIssued: item.quantityIssued,
       quantityAssembled,
+      recommendedUnitPrice: decimalToMoneyString(item.recommendedUnitPrice),
       unitPrice: decimalToMoneyString(item.unitPrice) ?? '0.00',
+      priceOverridden: item.priceOverridden ?? false,
+      lineDiscountType: (item.lineDiscountType as DiscountType | null | undefined) ?? null,
+      lineDiscountValue: decimalToMoneyString(item.lineDiscountValue),
+      lineDiscountAmount: decimalToMoneyString(item.lineDiscountAmount) ?? '0.00',
       lineSubtotal: decimalToMoneyString(item.lineSubtotal) ?? '0.00',
       sortOrder: item.sortOrder,
       compositionPreview:

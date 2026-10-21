@@ -78,6 +78,25 @@ describe('permissions matrix', () => {
     expect(roleHasPermissionSafe(Role.MANAGER, Permission.ORDERS_CANCEL)).toBe(true);
     expect(roleHasPermissionSafe(Role.MANAGER, Permission.ORDERS_DISCOUNT)).toBe(true);
   });
+
+  it('POS stage 1: florist can access/sell; manager can discount and override price', () => {
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.POS_ACCESS)).toBe(true);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.POS_SELL)).toBe(true);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.POS_PRICE_OVERRIDE)).toBe(false);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.POS_DISCOUNT)).toBe(false);
+    expect(roleHasPermissionSafe(Role.MANAGER, Permission.POS_PRICE_OVERRIDE)).toBe(true);
+    expect(roleHasPermissionSafe(Role.MANAGER, Permission.POS_DISCOUNT)).toBe(true);
+  });
+
+  it('Stage 2: florist can create payments; manager confirms/refunds and manages cash', () => {
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.PAYMENTS_CREATE)).toBe(true);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.PAYMENTS_CONFIRM)).toBe(false);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.PAYMENTS_REFUND)).toBe(false);
+    expect(roleHasPermissionSafe(Role.FLORIST, Permission.CASH_SHIFT_MANAGE)).toBe(false);
+    expect(roleHasPermissionSafe(Role.MANAGER, Permission.PAYMENTS_CONFIRM)).toBe(true);
+    expect(roleHasPermissionSafe(Role.MANAGER, Permission.PAYMENTS_REFUND)).toBe(true);
+    expect(roleHasPermissionSafe(Role.MANAGER, Permission.CASH_SHIFT_MANAGE)).toBe(true);
+  });
 });
 
 function roleHasPermissionSafe(role: Role, permission: Permission): boolean {

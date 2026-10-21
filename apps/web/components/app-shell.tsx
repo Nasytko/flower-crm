@@ -71,6 +71,12 @@ export function AppShell({ children }: { children: ReactNode }): ReactElement {
     ...(hasPermission(Permission.ORDERS_VIEW)
       ? [{ href: '/app/orders', label: 'Заказы', icon: '☰' }]
       : []),
+    ...(hasPermission(Permission.POS_ACCESS)
+      ? [{ href: '/app/pos', label: 'Продажи', icon: '$' }]
+      : []),
+    ...(hasPermission(Permission.CASH_SHIFT_MANAGE)
+      ? [{ href: '/app/cash', label: 'Касса', icon: '₴' }]
+      : []),
     ...(hasPermission(Permission.PRODUCTS_VIEW)
       ? [{ href: '/app/warehouse', label: 'Склад', icon: '▣' }]
       : []),

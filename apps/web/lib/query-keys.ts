@@ -19,5 +19,9 @@ export const queryKeys = {
   warehouseStock: ['warehouse', 'stock'] as const,
   warehouseStockDetail: (productId: string) => ['warehouse', 'stock', productId] as const,
   assembledBouquet: (id: string) => ['assembled-bouquets', id] as const,
+  posCarts: (status?: string) => ['pos', 'carts', status ?? 'all'] as const,
+  posCart: (id: string) => ['pos', 'cart', id] as const,
+  posCatalogPopular: ['pos', 'catalog', 'popular'] as const,
+  posCatalogSearch: (q: string) => ['pos', 'catalog', 'search', q] as const,
   systemSettings: ['settings', 'system'] as const,
 };

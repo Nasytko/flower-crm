@@ -15,7 +15,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DiscountType, FulfillmentType, OrderItemType, OrderStatus } from '@erp/shared';
+import {
+  DiscountType,
+  FulfillmentType,
+  OrderItemType,
+  OrderSource,
+  OrderStatus,
+} from '@erp/shared';
 
 function emptyToNull({ value }: { value: unknown }): unknown {
   if (value === '' || value === undefined) return null;
@@ -359,6 +365,20 @@ export class OrderQueryDto {
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')
   includeCancelled?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Include completed POS walk-in sales in the list. By default they are hidden from the Kanban.',
+    default: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  includeWalkIn?: boolean;
+
+  @ApiPropertyOptional({ enum: OrderSource, description: 'Filter by order source (explicit filter keeps walk-in sales visible)' })
+  @IsOptional()
+  @IsEnum(OrderSource)
+  source?: OrderSource;
 
   @ApiPropertyOptional({ description: 'HH:mm inclusive lower bound on timeFrom' })
   @IsOptional()

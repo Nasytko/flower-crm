@@ -132,6 +132,13 @@ model User {
   issuedBouquets           AssembledBouquet[] @relation("AssembledBouquetIssuer")
   writtenOffBouquets       AssembledBouquet[] @relation("AssembledBouquetWriteOff")
   adjustedBouquets         AssembledBouquet[] @relation("AssembledBouquetAdjuster")
+  posCartsOwned            PosCart[]          @relation("PosCartOwner")
+  posCartPriceOverrides    PosCartLine[]      @relation("PosCartLinePriceOverride")
+  paymentsCreated          Payment[]          @relation("PaymentCreator")
+  paymentsConfirmed        Payment[]          @relation("PaymentConfirmer")
+  cashShiftsOpened         CashShift[]        @relation("CashShiftOpener")
+  cashShiftsClosed         CashShift[]        @relation("CashShiftCloser")
+  cashMovementsCreated     CashMovement[]     @relation("CashMovementCreator")
 
   @@index([role, isActive])
   @@index([pinEnabled, isActive])
@@ -353,6 +360,8 @@ model Product {
   orderItemComponents OrderItemComponent[]
   stockReservations   StockReservation[]
   assembledComponents AssembledBouquetComponent[]
+  posCartLinesAsProduct PosCartLine[] @relation("PosCartLineProduct")
+  posCartLineComponents PosCartLineComponent[]
 
   @@index([type, isActive])
   @@index([name])
@@ -595,6 +604,7 @@ model Bouquet {
   items BouquetItem[]
   orderItems OrderItem[] @relation("OrderItemBouquet")
   assembledBouquets AssembledBouquet[] @relation("AssembledBouquetTemplate")
+  posCartLines PosCartLine[] @relation("PosCartLineBouquetTemplate")
 
   @@index([isActive])
   @@index([name])
@@ -653,6 +663,95 @@ enum DiscountType {
   FIXED
 }
 
+/// How the commercial document was created.
+enum OrderSource {
+  BACKOFFICE
+  POS
+}
+
+/// Walk-in (cashier) vs scheduled pre-order.
+enum OrderFulfillmentMode {
+  WALK_IN
+  SCHEDULED
+}
+
+/// Payment axis (orthogonal to assembly/issue). Computed from confirmed Payment rows.
+enum OrderPaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD_TERMINAL
+  ERIP
+  ONLINE_CARD
+  BANK_TRANSFER
+  GIFT_CERTIFICATE
+}
+
+enum PaymentSource {
+  POS
+  BACKOFFICE
+  WEBSITE
+  EXTERNAL_INTEGRATION
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentKind {
+  CHARGE
+  REFUND
+}
+
+enum CashShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  SALE_IN
+  REFUND_OUT
+  FLOAT_IN
+  FLOAT_OUT
+  ADJUSTMENT
+}
+
+/// Working POS cart lifecycle (no warehouse impact until confirm).
+enum PosCartStatus {
+  OPEN
+  PARKED
+  CONFIRMED
+  CANCELLED
+}
+
+/// Line kinds inside a POS cart. Bouquet instances are always quantity=1 per line.
+enum PosCartLineType {
+  PRODUCT
+  SERVICE
+  BOUQUET_TEMPLATE
+  BOUQUET_CUSTOM
+  ASSEMBLED
+}
+
+/// How a service (or child line) contributes to money.
+enum PosPriceMode {
+  /// Charged as its own amount (or added to bouquet unit price when inside composition).
+  ADDITIONAL
+  /// Visible in composition / assembly but not added again to totals.
+  INCLUDED
+}
+
 /// Atomic per-day sequence for human-readable Order.number (DDMMYY-NNN).
 model OrderDailyCounter {
   businessDate DateTime @id @db.Date
@@ -673,100 +772,123 @@ model AssembledBouquetDailyCounter {
 
 /// Commercial order document. Reservations + physical assembly / issue mutate warehouse.
 model Order {
-  id                       String          @id @default(cuid())
+  id                       String               @id @default(cuid())
   /// Human-readable business number, e.g. 150926-001. Not a PK.
-  number                   String          @unique
+  number                   String               @unique
   /// Calendar day used for number allocation (business TZ).
-  numberBusinessDate       DateTime        @db.Date
-  status                   OrderStatus     @default(NEW)
-  /// Optional display name; phone is the primary customer identifier.
-  customerName             String          @default("")
-  customerPhone            String
+  numberBusinessDate       DateTime             @db.Date
+  status                   OrderStatus          @default(NEW)
+  source                   OrderSource          @default(BACKOFFICE)
+  fulfillmentMode          OrderFulfillmentMode @default(SCHEDULED)
+  paymentStatus            OrderPaymentStatus   @default(UNPAID)
+  /// Optional display name; phone is the primary customer identifier (empty allowed for WALK_IN).
+  customerName             String               @default("")
+  customerPhone            String               @default("")
   fulfillmentType          FulfillmentType
-  fulfillmentDate          DateTime        @db.Date
+  fulfillmentDate          DateTime             @db.Date
   /// Local wall-clock HH:mm (business day). Not a UTC instant.
-  fulfillmentTimeFrom      String?         @db.VarChar(5)
-  fulfillmentTimeTo        String?         @db.VarChar(5)
+  fulfillmentTimeFrom      String?              @db.VarChar(5)
+  fulfillmentTimeTo        String?              @db.VarChar(5)
   recipientName            String?
   recipientPhone           String?
   deliveryAddressText      String?
-  deliveryLatitude         Decimal?        @db.Decimal(9, 6)
-  deliveryLongitude        Decimal?        @db.Decimal(9, 6)
+  deliveryLatitude         Decimal?             @db.Decimal(9, 6)
+  deliveryLongitude        Decimal?             @db.Decimal(9, 6)
   deliveryProvider         String?
   deliveryProviderPlaceId  String?
   deliveryComment          String?
   orderComment             String?
-  subtotal                 Decimal         @db.Decimal(12, 2)
+  subtotal                 Decimal              @db.Decimal(12, 2)
   discountType             DiscountType?
-  discountValue            Decimal?        @db.Decimal(12, 2)
-  discountAmount           Decimal         @default(0) @db.Decimal(12, 2)
-  total                    Decimal         @db.Decimal(12, 2)
+  discountValue            Decimal?             @db.Decimal(12, 2)
+  discountAmount           Decimal              @default(0) @db.Decimal(12, 2)
+  total                    Decimal              @db.Decimal(12, 2)
   /// Snapshot of known COGS from issued / directly issued lines. Null if uncosted.
-  actualCost               Decimal?        @db.Decimal(12, 2)
+  actualCost               Decimal?             @db.Decimal(12, 2)
   /// True when any issue consumed at least one lot without unitPurchasePrice.
-  hasUncostedConsumption   Boolean         @default(false)
-  version                  Int             @default(1)
+  hasUncostedConsumption   Boolean              @default(false)
+  /// Idempotency for POS confirm (and future payment retries).
+  idempotencyKey           String?              @unique
+  version                  Int                  @default(1)
   createdByUserId          String
   updatedByUserId          String?
   inProgressAt             DateTime?
   readyAt                  DateTime?
   completedAt              DateTime?
   cancelledAt              DateTime?
-  createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @updatedAt
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
 
-  createdBy     User               @relation("OrderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  updatedBy     User?              @relation("OrderUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
-  items         OrderItem[]
-  reservations  StockReservation[]
+  createdBy         User               @relation("OrderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedBy         User?              @relation("OrderUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  items             OrderItem[]
+  reservations      StockReservation[]
   assembledBouquets AssembledBouquet[]
+  posCart           PosCart?           @relation("PosCartConfirmedOrder")
+  payments          Payment[]
 
   @@index([fulfillmentDate, status])
   @@index([fulfillmentDate, fulfillmentType])
   @@index([fulfillmentDate, fulfillmentTimeFrom])
   @@index([status])
+  @@index([source, createdAt])
   @@index([createdAt])
   @@map("orders")
 }
 
 model OrderItem {
-  id           String        @id @default(cuid())
-  orderId      String
-  itemType     OrderItemType
-  productId    String?
-  bouquetId    String?
-  nameSnapshot String
-  quantity     Int
+  id                    String        @id @default(cuid())
+  orderId               String
+  itemType              OrderItemType
+  productId             String?
+  /// Null for custom / vitrine-derived bouquet instances without a catalog template.
+  bouquetId             String?
+  /// Optional link: ADDITIONAL service line → parent bouquet/product line.
+  parentOrderItemId     String?
+  priceMode             PosPriceMode  @default(ADDITIONAL)
+  nameSnapshot          String
+  quantity              Int
   /// How many units of this line were issued directly (PRODUCT) or via AssembledBouquet ISSUE.
-  quantityIssued Int         @default(0)
-  unitPrice    Decimal       @db.Decimal(12, 2)
-  lineSubtotal Decimal       @db.Decimal(12, 2)
-  sortOrder    Int           @default(0)
-  createdAt    DateTime      @default(now())
+  quantityIssued        Int           @default(0)
+  recommendedUnitPrice  Decimal?      @db.Decimal(12, 2)
+  unitPrice             Decimal       @db.Decimal(12, 2)
+  priceOverridden       Boolean       @default(false)
+  lineDiscountType      DiscountType?
+  lineDiscountValue     Decimal?      @db.Decimal(12, 2)
+  lineDiscountAmount    Decimal       @default(0) @db.Decimal(12, 2)
+  lineSubtotal          Decimal       @db.Decimal(12, 2)
+  sortOrder             Int           @default(0)
+  createdAt             DateTime      @default(now())
 
-  order      Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product    Product?             @relation("OrderItemProduct", fields: [productId], references: [id], onDelete: Restrict)
-  bouquet    Bouquet?             @relation("OrderItemBouquet", fields: [bouquetId], references: [id], onDelete: Restrict)
-  components OrderItemComponent[]
+  order             Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           Product?             @relation("OrderItemProduct", fields: [productId], references: [id], onDelete: Restrict)
+  bouquet           Bouquet?             @relation("OrderItemBouquet", fields: [bouquetId], references: [id], onDelete: Restrict)
+  parentOrderItem   OrderItem?           @relation("OrderItemParent", fields: [parentOrderItemId], references: [id], onDelete: Cascade)
+  childOrderItems   OrderItem[]          @relation("OrderItemParent")
+  components        OrderItemComponent[]
   assembledBouquets AssembledBouquet[]
 
   @@index([orderId])
   @@index([productId])
   @@index([bouquetId])
+  @@index([parentOrderItemId])
   @@map("order_items")
 }
 
 /// Frozen bouquet (or future) composition requirement for Phase 8 reservations.
 model OrderItemComponent {
-  id                  String      @id @default(cuid())
-  orderItemId         String
-  productId           String
-  productNameSnapshot String
-  productTypeSnapshot ProductType
-  unitSnapshot        Unit
-  quantityPerItem     Int
-  totalQuantity       Int
-  sortOrder           Int         @default(0)
+  id                    String       @id @default(cuid())
+  orderItemId           String
+  productId             String
+  productNameSnapshot   String
+  productTypeSnapshot   ProductType
+  unitSnapshot          Unit
+  quantityPerItem       Int
+  totalQuantity         Int
+  /// For SERVICE lines inside a bouquet: INCLUDED vs ADDITIONAL (no double charge).
+  priceMode             PosPriceMode @default(ADDITIONAL)
+  unitSalePriceSnapshot Decimal?     @db.Decimal(12, 2)
+  sortOrder             Int          @default(0)
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -838,6 +960,7 @@ model AssembledBouquet {
   writtenOffBy    User?    @relation("AssembledBouquetWriteOff", fields: [writtenOffByUserId], references: [id], onDelete: SetNull)
   lastAdjustedBy  User?    @relation("AssembledBouquetAdjuster", fields: [lastAdjustedByUserId], references: [id], onDelete: SetNull)
   components      AssembledBouquetComponent[]
+  posCartLines    PosCartLine[] @relation("PosCartLineAssembled")
 
   @@index([status])
   @@index([orderId])
@@ -883,4 +1006,201 @@ model AssembledBouquetComponentLot {
   @@index([componentId])
   @@index([stockLotId])
   @@map("assembled_bouquet_component_lots")
+}
+
+/// POS working cart. Does NOT reserve stock or create warehouse movements until confirm.
+model PosCart {
+  id                   String        @id @default(cuid())
+  status               PosCartStatus @default(OPEN)
+  ownerUserId          String
+  /// Optimistic concurrency for multi-device edits.
+  version              Int           @default(1)
+  discountType         DiscountType?
+  discountValue        Decimal?      @db.Decimal(12, 2)
+  discountAmount       Decimal       @default(0) @db.Decimal(12, 2)
+  subtotal             Decimal       @default(0) @db.Decimal(12, 2)
+  total                Decimal       @default(0) @db.Decimal(12, 2)
+  parkedAt             DateTime?
+  parkedLabel          String?
+  /// Set on successful confirm; unique for idempotent retries.
+  confirmIdempotencyKey String?      @unique
+  confirmedOrderId     String?       @unique
+  confirmedAt          DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  owner          User          @relation("PosCartOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  confirmedOrder Order?        @relation("PosCartConfirmedOrder", fields: [confirmedOrderId], references: [id], onDelete: SetNull)
+  lines          PosCartLine[]
+
+  @@index([ownerUserId, status])
+  @@index([status, updatedAt])
+  @@map("pos_carts")
+}
+
+model PosCartLine {
+  id                     String         @id @default(cuid())
+  cartId                 String
+  lineType               PosCartLineType
+  productId              String?
+  bouquetTemplateId      String?
+  assembledBouquetId     String?
+  /// ADDITIONAL service attached to a specific bouquet/product instance in the cart.
+  parentLineId           String?
+  priceMode              PosPriceMode   @default(ADDITIONAL)
+  nameSnapshot           String
+  /// Bouquet / assembled instances are always 1; products/services may be >1.
+  quantity               Int            @default(1)
+  recommendedUnitPrice   Decimal        @db.Decimal(12, 2)
+  unitPrice              Decimal        @db.Decimal(12, 2)
+  priceOverridden        Boolean        @default(false)
+  priceOverrideReason    String?
+  priceOverriddenByUserId String?
+  lineDiscountType       DiscountType?
+  lineDiscountValue      Decimal?       @db.Decimal(12, 2)
+  lineDiscountAmount     Decimal        @default(0) @db.Decimal(12, 2)
+  lineSubtotal           Decimal        @db.Decimal(12, 2)
+  sortOrder              Int            @default(0)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  cart                  PosCart                @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product               Product?               @relation("PosCartLineProduct", fields: [productId], references: [id], onDelete: Restrict)
+  bouquetTemplate       Bouquet?               @relation("PosCartLineBouquetTemplate", fields: [bouquetTemplateId], references: [id], onDelete: Restrict)
+  assembledBouquet      AssembledBouquet?      @relation("PosCartLineAssembled", fields: [assembledBouquetId], references: [id], onDelete: Restrict)
+  parentLine            PosCartLine?           @relation("PosCartLineParent", fields: [parentLineId], references: [id], onDelete: Cascade)
+  childLines            PosCartLine[]          @relation("PosCartLineParent")
+  priceOverriddenBy     User?                  @relation("PosCartLinePriceOverride", fields: [priceOverriddenByUserId], references: [id], onDelete: SetNull)
+  components            PosCartLineComponent[]
+
+  @@index([cartId, sortOrder])
+  @@index([assembledBouquetId])
+  @@index([parentLineId])
+  @@map("pos_cart_lines")
+}
+
+model PosCartLineComponent {
+  id                    String       @id @default(cuid())
+  lineId                String
+  productId             String
+  productNameSnapshot   String
+  productTypeSnapshot   ProductType
+  unitSnapshot          Unit         @default(PIECE)
+  quantity              Int
+  unitSalePriceSnapshot Decimal?     @db.Decimal(12, 2)
+  /// SERVICE: INCLUDED in bouquet price vs ADDITIONAL charge inside the instance.
+  priceMode             PosPriceMode @default(ADDITIONAL)
+  sortOrder             Int          @default(0)
+  createdAt             DateTime     @default(now())
+
+  line    PosCartLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([lineId])
+  @@index([productId])
+  @@map("pos_cart_line_components")
+}
+
+/// Physical / logical cash drawer (minimal: one MAIN register seeded by migration).
+model CashRegister {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shifts CashShift[]
+
+  @@map("cash_registers")
+}
+
+/// Internal ERP cash shift (not a fiscal device shift).
+model CashShift {
+  id              String          @id @default(cuid())
+  cashRegisterId  String
+  status          CashShiftStatus @default(OPEN)
+  openedByUserId  String
+  closedByUserId  String?
+  openingFloat    Decimal         @db.Decimal(12, 2)
+  expectedCash    Decimal?        @db.Decimal(12, 2)
+  countedCash     Decimal?        @db.Decimal(12, 2)
+  discrepancy     Decimal?        @db.Decimal(12, 2)
+  openedAt        DateTime        @default(now())
+  closedAt        DateTime?
+  note            String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  cashRegister CashRegister   @relation(fields: [cashRegisterId], references: [id], onDelete: Restrict)
+  openedBy     User           @relation("CashShiftOpener", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  closedBy     User?          @relation("CashShiftCloser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  movements    CashMovement[]
+  payments     Payment[]
+
+  @@index([cashRegisterId, status])
+  @@index([status, openedAt])
+  @@map("cash_shifts")
+}
+
+model CashMovement {
+  id              String           @id @default(cuid())
+  cashShiftId     String
+  type            CashMovementType
+  amount          Decimal          @db.Decimal(12, 2)
+  paymentId       String?
+  note            String?
+  createdByUserId String
+  createdAt       DateTime         @default(now())
+
+  cashShift CashShift @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+  payment   Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdBy User      @relation("CashMovementCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([cashShiftId, createdAt])
+  @@index([paymentId])
+  @@map("cash_movements")
+}
+
+/// Charge or refund against an Order. Confirmed amounts drive Order.paymentStatus.
+model Payment {
+  id                     String         @id @default(cuid())
+  orderId                String
+  kind                   PaymentKind    @default(CHARGE)
+  amount                 Decimal        @db.Decimal(12, 2)
+  currency               String         @default("BYN") @db.VarChar(3)
+  method                 PaymentMethod
+  source                 PaymentSource
+  status                 PaymentStatus  @default(PENDING)
+  /// REFUND → original CHARGE payment.
+  parentPaymentId        String?
+  externalTransactionId  String?
+  externalProvider       String?
+  idempotencyKey         String         @unique
+  cashShiftId            String?
+  /// True when staff manually recorded ERIP/terminal/online (not provider webhook).
+  isManual               Boolean        @default(false)
+  note                   String?
+  /// Non-sensitive provider payload / UI hints (never card PAN/CVV).
+  metadata               Json?
+  createdByUserId        String
+  confirmedByUserId      String?
+  createdAt              DateTime       @default(now())
+  confirmedAt            DateTime?
+  updatedAt              DateTime       @updatedAt
+
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  parentPayment Payment?       @relation("PaymentRefundParent", fields: [parentPaymentId], references: [id], onDelete: Restrict)
+  refunds       Payment[]      @relation("PaymentRefundParent")
+  cashShift     CashShift?     @relation(fields: [cashShiftId], references: [id], onDelete: SetNull)
+  createdBy     User           @relation("PaymentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  confirmedBy   User?          @relation("PaymentConfirmer", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  cashMovements CashMovement[]
+
+  @@unique([externalProvider, externalTransactionId])
+  @@index([orderId, status])
+  @@index([cashShiftId])
+  @@index([parentPaymentId])
+  @@index([createdAt])
+  @@map("payments")
 }

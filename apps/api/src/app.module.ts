@@ -25,6 +25,9 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { AddressModule } from './modules/address/address.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SecurityModule } from './modules/security/security.module';
+import { PosModule } from './modules/pos/pos.module';
+import { CashModule } from './modules/cash/cash.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -150,6 +153,9 @@ import { SecurityModule } from './modules/security/security.module';
     InventoriesModule,
     BouquetsModule,
     OrdersModule,
+    PosModule,
+    CashModule,
+    PaymentsModule,
     AddressModule,
     SettingsModule,
     SecurityModule,

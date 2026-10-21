@@ -77,6 +77,23 @@ export enum Permission {
   /** Override higher-priority planned reserve when assembling a later order. */
   ORDERS_RESERVE_OVERRIDE = 'orders.reserve_override',
 
+  /** Access POS / sales UI and working carts. */
+  POS_ACCESS = 'pos.access',
+  /** Confirm POS cart → Order. */
+  POS_SELL = 'pos.sell',
+  /** Override recommended unit price on a POS line. */
+  POS_PRICE_OVERRIDE = 'pos.price_override',
+  /** Apply line or cart discounts in POS (also accepts ORDERS_DISCOUNT). */
+  POS_DISCOUNT = 'pos.discount',
+  /** Register a payment (charge) against an order. */
+  PAYMENTS_CREATE = 'payments.create',
+  /** Confirm PENDING external/manual payment. */
+  PAYMENTS_CONFIRM = 'payments.confirm',
+  /** Register refund (foundation; may stay PENDING without provider). */
+  PAYMENTS_REFUND = 'payments.refund',
+  /** Open / close cash shifts and float movements. */
+  CASH_SHIFT_MANAGE = 'cash.shift_manage',
+
   PURCHASE_PRICE_VIEW = 'purchase_price.view',
 
   AUDIT_VIEW = 'audit.view',
@@ -100,6 +117,9 @@ const FLORIST_PERMISSIONS: readonly Permission[] = [
   Permission.ORDERS_STATUS,
   Permission.ORDERS_ASSEMBLE,
   Permission.ORDERS_ISSUE,
+  Permission.POS_ACCESS,
+  Permission.POS_SELL,
+  Permission.PAYMENTS_CREATE,
 ];
 
 const MANAGER_PERMISSIONS: readonly Permission[] = [
@@ -116,6 +136,11 @@ const MANAGER_PERMISSIONS: readonly Permission[] = [
   Permission.ORDERS_CANCEL,
   Permission.ORDERS_DISCOUNT,
   Permission.ORDERS_RESERVE_OVERRIDE,
+  Permission.POS_PRICE_OVERRIDE,
+  Permission.POS_DISCOUNT,
+  Permission.PAYMENTS_CONFIRM,
+  Permission.PAYMENTS_REFUND,
+  Permission.CASH_SHIFT_MANAGE,
   Permission.PURCHASE_PRICE_VIEW,
   Permission.AUDIT_VIEW,
 ];
@@ -261,6 +286,24 @@ export enum AuditAction {
   BOUQUET_LINKED_TO_ORDER = 'BOUQUET_LINKED_TO_ORDER',
   ORDER_DIRECT_ISSUED = 'ORDER_DIRECT_ISSUED',
   RESERVE_OVERRIDE_USED = 'RESERVE_OVERRIDE_USED',
+
+  POS_CART_CREATED = 'POS_CART_CREATED',
+  POS_CART_UPDATED = 'POS_CART_UPDATED',
+  POS_CART_PARKED = 'POS_CART_PARKED',
+  POS_CART_RESUMED = 'POS_CART_RESUMED',
+  POS_CART_CONFIRMED = 'POS_CART_CONFIRMED',
+  POS_PRICE_OVERRIDDEN = 'POS_PRICE_OVERRIDDEN',
+  POS_QUICK_SALE_COMPLETED = 'POS_QUICK_SALE_COMPLETED',
+
+  PAYMENT_CREATED = 'PAYMENT_CREATED',
+  PAYMENT_CONFIRMED = 'PAYMENT_CONFIRMED',
+  PAYMENT_FAILED = 'PAYMENT_FAILED',
+  PAYMENT_CANCELLED = 'PAYMENT_CANCELLED',
+  PAYMENT_REFUND_CREATED = 'PAYMENT_REFUND_CREATED',
+
+  CASH_SHIFT_OPENED = 'CASH_SHIFT_OPENED',
+  CASH_SHIFT_CLOSED = 'CASH_SHIFT_CLOSED',
+  CASH_MOVEMENT_CREATED = 'CASH_MOVEMENT_CREATED',
 
   PIN_ENABLED = 'PIN_ENABLED',
   PIN_DISABLED = 'PIN_DISABLED',
@@ -882,6 +925,134 @@ export enum DiscountType {
   FIXED = 'FIXED',
 }
 
+export enum OrderSource {
+  BACKOFFICE = 'BACKOFFICE',
+  POS = 'POS',
+}
+
+export enum OrderFulfillmentMode {
+  WALK_IN = 'WALK_IN',
+  SCHEDULED = 'SCHEDULED',
+}
+
+export enum OrderPaymentStatus {
+  UNPAID = 'UNPAID',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+  REFUNDED = 'REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+}
+
+export enum PaymentMethod {
+  CASH = 'CASH',
+  CARD_TERMINAL = 'CARD_TERMINAL',
+  ERIP = 'ERIP',
+  ONLINE_CARD = 'ONLINE_CARD',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  GIFT_CERTIFICATE = 'GIFT_CERTIFICATE',
+}
+
+export enum PaymentSource {
+  POS = 'POS',
+  BACKOFFICE = 'BACKOFFICE',
+  WEBSITE = 'WEBSITE',
+  EXTERNAL_INTEGRATION = 'EXTERNAL_INTEGRATION',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+  REFUNDED = 'REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+}
+
+export enum PaymentKind {
+  CHARGE = 'CHARGE',
+  REFUND = 'REFUND',
+}
+
+export enum CashShiftStatus {
+  OPEN = 'OPEN',
+  CLOSED = 'CLOSED',
+}
+
+export enum CashMovementType {
+  SALE_IN = 'SALE_IN',
+  REFUND_OUT = 'REFUND_OUT',
+  FLOAT_IN = 'FLOAT_IN',
+  FLOAT_OUT = 'FLOAT_OUT',
+  ADJUSTMENT = 'ADJUSTMENT',
+}
+
+export const ORDER_PAYMENT_STATUS_LABELS_RU: Record<OrderPaymentStatus, string> = {
+  [OrderPaymentStatus.UNPAID]: 'Не оплачен',
+  [OrderPaymentStatus.PARTIALLY_PAID]: 'Частично оплачен',
+  [OrderPaymentStatus.PAID]: 'Оплачен',
+  [OrderPaymentStatus.REFUNDED]: 'Возвращён',
+  [OrderPaymentStatus.PARTIALLY_REFUNDED]: 'Частичный возврат',
+};
+
+export const PAYMENT_METHOD_LABELS_RU: Record<PaymentMethod, string> = {
+  [PaymentMethod.CASH]: 'Наличные',
+  [PaymentMethod.CARD_TERMINAL]: 'Карта (терминал)',
+  [PaymentMethod.ERIP]: 'ЕРИП',
+  [PaymentMethod.ONLINE_CARD]: 'Онлайн-карта',
+  [PaymentMethod.BANK_TRANSFER]: 'Банковский перевод',
+  [PaymentMethod.GIFT_CERTIFICATE]: 'Подарочный сертификат',
+};
+
+export enum PosCartStatus {
+  OPEN = 'OPEN',
+  PARKED = 'PARKED',
+  CONFIRMED = 'CONFIRMED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum PosCartLineType {
+  PRODUCT = 'PRODUCT',
+  SERVICE = 'SERVICE',
+  BOUQUET_TEMPLATE = 'BOUQUET_TEMPLATE',
+  BOUQUET_CUSTOM = 'BOUQUET_CUSTOM',
+  ASSEMBLED = 'ASSEMBLED',
+}
+
+export enum PosPriceMode {
+  ADDITIONAL = 'ADDITIONAL',
+  INCLUDED = 'INCLUDED',
+}
+
+export const ORDER_SOURCE_LABELS_RU: Record<OrderSource, string> = {
+  [OrderSource.BACKOFFICE]: 'Заказы',
+  [OrderSource.POS]: 'Продажи',
+};
+
+export const ORDER_FULFILLMENT_MODE_LABELS_RU: Record<OrderFulfillmentMode, string> = {
+  [OrderFulfillmentMode.WALK_IN]: 'В магазине',
+  [OrderFulfillmentMode.SCHEDULED]: 'Предзаказ',
+};
+
+export const POS_CART_STATUS_LABELS_RU: Record<PosCartStatus, string> = {
+  [PosCartStatus.OPEN]: 'Открыта',
+  [PosCartStatus.PARKED]: 'Отложена',
+  [PosCartStatus.CONFIRMED]: 'Оформлена',
+  [PosCartStatus.CANCELLED]: 'Отменена',
+};
+
+export const POS_CART_LINE_TYPE_LABELS_RU: Record<PosCartLineType, string> = {
+  [PosCartLineType.PRODUCT]: 'Товар',
+  [PosCartLineType.SERVICE]: 'Услуга',
+  [PosCartLineType.BOUQUET_TEMPLATE]: 'Букет (шаблон)',
+  [PosCartLineType.BOUQUET_CUSTOM]: 'Индивидуальный букет',
+  [PosCartLineType.ASSEMBLED]: 'Готовый букет',
+};
+
+export const POS_PRICE_MODE_LABELS_RU: Record<PosPriceMode, string> = {
+  [PosPriceMode.ADDITIONAL]: 'Дополнительно',
+  [PosPriceMode.INCLUDED]: 'Включено в цену',
+};
+
 export const ORDER_STATUS_LABELS_RU: Record<OrderStatus, string> = {
   [OrderStatus.NEW]: 'Новый',
   [OrderStatus.IN_PROGRESS]: 'В сборке',
@@ -922,6 +1093,8 @@ export interface OrderItemComponentDto {
   unitSnapshot: Unit;
   quantityPerItem: number;
   totalQuantity: number;
+  priceMode: PosPriceMode;
+  unitSalePriceSnapshot: MoneyString | null;
   sortOrder: number;
 }
 
@@ -930,12 +1103,19 @@ export interface OrderItemDto {
   itemType: OrderItemType;
   productId: string | null;
   bouquetId: string | null;
+  parentOrderItemId: string | null;
+  priceMode: PosPriceMode;
   nameSnapshot: string;
   quantity: number;
   quantityIssued: number;
   /** Count of physical AssembledBouquet still ASSEMBLED for this line. */
   quantityAssembled: number;
+  recommendedUnitPrice: MoneyString | null;
   unitPrice: MoneyString;
+  priceOverridden: boolean;
+  lineDiscountType: DiscountType | null;
+  lineDiscountValue: MoneyString | null;
+  lineDiscountAmount: MoneyString;
   lineSubtotal: MoneyString;
   sortOrder: number;
   compositionPreview: string | null;
@@ -954,6 +1134,9 @@ export interface OrderListItem {
   id: string;
   number: string;
   status: OrderStatus;
+  source: OrderSource;
+  fulfillmentMode: OrderFulfillmentMode;
+  paymentStatus: OrderPaymentStatus;
   fulfillmentType: FulfillmentType;
   fulfillmentDate: string;
   fulfillmentTimeFrom: string | null;
@@ -1017,6 +1200,9 @@ export interface OrderDetail extends OrderListItem {
   requirements: OrderRequirementDto[];
   /** Physical ASSEMBLED bouquets linked to this order. */
   assembledBouquets: AssembledBouquetListItem[];
+  paymentSummary: OrderPaymentSummaryDto;
+  payments: PaymentDto[];
+  fulfillmentProgress: OrderFulfillmentProgressDto;
 }
 
 export interface BusinessTimeInfo {
@@ -1115,4 +1301,217 @@ export interface AssembledBouquetDetail extends AssembledBouquetListItem {
   issuedAt: string | null;
   disassembledAt: string | null;
   components: AssembledBouquetComponentDto[];
+}
+
+export interface PosCartLineComponentDto {
+  id: string;
+  productId: string;
+  productNameSnapshot: string;
+  productTypeSnapshot: ProductType;
+  unitSnapshot: Unit;
+  quantity: number;
+  unitSalePriceSnapshot: MoneyString | null;
+  priceMode: PosPriceMode;
+  /** FLOWER available (onHand − reserved). Null for SERVICE. */
+  availableQuantity: number | null;
+  sortOrder: number;
+}
+
+export interface PosCartLineDto {
+  id: string;
+  lineType: PosCartLineType;
+  productId: string | null;
+  bouquetTemplateId: string | null;
+  assembledBouquetId: string | null;
+  parentLineId: string | null;
+  priceMode: PosPriceMode;
+  nameSnapshot: string;
+  quantity: number;
+  recommendedUnitPrice: MoneyString;
+  unitPrice: MoneyString;
+  priceOverridden: boolean;
+  priceOverrideReason: string | null;
+  lineDiscountType: DiscountType | null;
+  lineDiscountValue: MoneyString | null;
+  lineDiscountAmount: MoneyString;
+  lineSubtotal: MoneyString;
+  sortOrder: number;
+  components: PosCartLineComponentDto[];
+  childLines: PosCartLineDto[];
+}
+
+export interface PosCartDto {
+  id: string;
+  status: PosCartStatus;
+  ownerUserId: string;
+  version: number;
+  discountType: DiscountType | null;
+  discountValue: MoneyString | null;
+  discountAmount: MoneyString;
+  subtotal: MoneyString;
+  total: MoneyString;
+  parkedAt: string | null;
+  parkedLabel: string | null;
+  confirmedOrderId: string | null;
+  confirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: PosCartLineDto[];
+}
+
+export interface PosCartListItem {
+  id: string;
+  status: PosCartStatus;
+  ownerUserId: string;
+  version: number;
+  total: MoneyString;
+  lineCount: number;
+  parkedAt: string | null;
+  parkedLabel: string | null;
+  updatedAt: string;
+}
+
+export interface PosCatalogItemDto {
+  kind: 'PRODUCT' | 'SERVICE' | 'BOUQUET' | 'ASSEMBLED';
+  id: string;
+  name: string;
+  salePrice: MoneyString | null;
+  productType: ProductType | null;
+  availableQuantity: number | null;
+  assembledNumber: string | null;
+  assembledStatus: AssembledBouquetStatus | null;
+  primaryImageId: string | null;
+}
+
+export interface OrderPaymentSummaryDto {
+  orderTotal: MoneyString;
+  confirmedPaid: MoneyString;
+  confirmedRefunded: MoneyString;
+  netPaid: MoneyString;
+  pendingAmount: MoneyString;
+  remainingDue: MoneyString;
+  paymentProgressPercent: number;
+  paymentStatus: OrderPaymentStatus;
+}
+
+export interface PaymentDto {
+  id: string;
+  orderId: string;
+  kind: PaymentKind;
+  amount: MoneyString;
+  currency: string;
+  method: PaymentMethod;
+  source: PaymentSource;
+  status: PaymentStatus;
+  parentPaymentId: string | null;
+  externalTransactionId: string | null;
+  externalProvider: string | null;
+  idempotencyKey: string;
+  cashShiftId: string | null;
+  isManual: boolean;
+  note: string | null;
+  createdByUserId: string;
+  createdByName: string;
+  confirmedByUserId: string | null;
+  confirmedByName: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+}
+
+export interface OrderFulfillmentProgressDto {
+  fulfillmentType: FulfillmentType;
+  fulfillmentMode: OrderFulfillmentMode;
+  status: OrderStatus;
+  /** Stages for UI strip (id + label + state). */
+  stages: Array<{
+    id: string;
+    label: string;
+    state: 'done' | 'current' | 'pending' | 'skipped';
+    at: string | null;
+    byName: string | null;
+    /** Honest annotation, e.g. «Нет подтверждения» for courier stages. */
+    hint?: string | null;
+  }>;
+  bouquetAssembledCount: number;
+  bouquetRequiredCount: number;
+  productIssuedCount: number;
+  productRequiredCount: number;
+  nextAction: string | null;
+}
+
+export interface CashShiftDto {
+  id: string;
+  cashRegisterId: string;
+  cashRegisterCode: string;
+  cashRegisterName: string;
+  status: CashShiftStatus;
+  openingFloat: MoneyString;
+  expectedCash: MoneyString | null;
+  countedCash: MoneyString | null;
+  discrepancy: MoneyString | null;
+  openedAt: string;
+  closedAt: string | null;
+  openedByName: string;
+  closedByName: string | null;
+  note: string | null;
+}
+
+export interface CashMovementDto {
+  id: string;
+  cashShiftId: string;
+  type: CashMovementType;
+  amount: MoneyString;
+  paymentId: string | null;
+  note: string | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface CashRegisterDto {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  /** OPEN shift on this register, if any. */
+  openShift: CashShiftDto | null;
+}
+
+export interface CashShiftSummaryDto {
+  openingFloat: MoneyString;
+  saleIn: MoneyString;
+  refundOut: MoneyString;
+  floatIn: MoneyString;
+  floatOut: MoneyString;
+  adjustments: MoneyString;
+  /** opening + saleIn − refundOut + floatIn − floatOut + adjustments. */
+  expectedCash: MoneyString;
+}
+
+export interface CashShiftDetailDto extends CashShiftDto {
+  summary: CashShiftSummaryDto;
+  movements: CashMovementDto[];
+}
+
+export interface PosQuickSellResultDto {
+  cart: PosCartDto;
+  orderId: string;
+  orderNumber: string;
+  paymentStatus: OrderPaymentStatus;
+  orderStatus: OrderStatus;
+  payments: PaymentDto[];
+  issued: boolean;
+  /** Non-fatal problems (e.g. issue failed on stock) — order stays paid but not completed. */
+  warnings: string[];
+}
+
+export interface PaymentMutationResultDto {
+  payment: PaymentDto;
+  summary: OrderPaymentSummaryDto;
+  /** True when an idempotent retry returned the already-recorded payment. */
+  replayed: boolean;
+}
+
+export interface OrderPaymentsDto {
+  summary: OrderPaymentSummaryDto;
+  payments: PaymentDto[];
 }
