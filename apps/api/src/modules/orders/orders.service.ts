@@ -612,13 +612,9 @@ export class OrdersService {
             ? dto.deliveryAddressText
             : existing.deliveryAddressText,
         deliveryLatitude:
-          dto.deliveryLatitude !== undefined
-            ? dto.deliveryLatitude
-            : existing.deliveryLatitude,
+          dto.deliveryLatitude !== undefined ? dto.deliveryLatitude : existing.deliveryLatitude,
         deliveryLongitude:
-          dto.deliveryLongitude !== undefined
-            ? dto.deliveryLongitude
-            : existing.deliveryLongitude,
+          dto.deliveryLongitude !== undefined ? dto.deliveryLongitude : existing.deliveryLongitude,
         deliveryProvider:
           dto.deliveryProvider !== undefined ? dto.deliveryProvider : existing.deliveryProvider,
         deliveryProviderPlaceId:

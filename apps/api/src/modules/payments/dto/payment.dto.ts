@@ -46,7 +46,9 @@ export class CreatePaymentDto {
   @IsIn([PaymentSource.POS, PaymentSource.BACKOFFICE])
   source?: PaymentSource;
 
-  @ApiPropertyOptional({ description: 'Provider code, e.g. ERIP / bepaid (required with externalTransactionId)' })
+  @ApiPropertyOptional({
+    description: 'Provider code, e.g. ERIP / bepaid (required with externalTransactionId)',
+  })
   @IsOptional()
   @Transform(trimString)
   @IsString()
@@ -73,7 +75,9 @@ export class CreatePaymentDto {
   @IsBoolean()
   isManual?: boolean;
 
-  @ApiPropertyOptional({ description: 'CASH only. Defaults to the open shift of the MAIN register.' })
+  @ApiPropertyOptional({
+    description: 'CASH only. Defaults to the open shift of the MAIN register.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(64)
@@ -88,7 +92,9 @@ export class CreatePaymentDto {
 }
 
 export class ConfirmPaymentDto {
-  @ApiProperty({ description: 'Must be true: confirmation is a manual staff action (no provider webhook yet)' })
+  @ApiProperty({
+    description: 'Must be true: confirmation is a manual staff action (no provider webhook yet)',
+  })
   @IsBoolean()
   isManual!: boolean;
 

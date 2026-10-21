@@ -918,15 +918,7 @@ function CartLineRow({
   );
 }
 
-type DialogKind =
-  | 'edit'
-  | 'custom'
-  | 'park'
-  | 'list'
-  | 'discount'
-  | 'confirm'
-  | 'quickSell'
-  | null;
+type DialogKind = 'edit' | 'custom' | 'park' | 'list' | 'discount' | 'confirm' | 'quickSell' | null;
 
 export function PosPage(): ReactElement {
   const { hasPermission } = useAuth();
@@ -1673,7 +1665,12 @@ function PosQuickSellDialog({
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-muted-foreground">Нет открытой кассовой смены</p>
-                <Button size="sm" variant="outline" disabled={opening} onClick={() => void openShift()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={opening}
+                  onClick={() => void openShift()}
+                >
                   {opening ? 'Открытие…' : 'Открыть смену'}
                 </Button>
               </div>

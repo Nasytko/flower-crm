@@ -4,11 +4,7 @@ import { computeOrderPaymentSummary, type PaymentCalcInput } from './payment-cal
 
 const D = (v: string) => new Prisma.Decimal(v);
 
-function pay(
-  kind: PaymentKind,
-  status: PaymentStatus,
-  amount: string,
-): PaymentCalcInput {
+function pay(kind: PaymentKind, status: PaymentStatus, amount: string): PaymentCalcInput {
   return { kind, status, amount: D(amount) };
 }
 

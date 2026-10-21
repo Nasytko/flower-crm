@@ -88,7 +88,13 @@ export function buildFulfillmentProgress(
   }
 
   // --- stages ---------------------------------------------------------------
-  const created = stage('created', walkIn ? 'Оформлен' : 'Принят', 'done', order.createdAt, order.createdBy?.name ?? null);
+  const created = stage(
+    'created',
+    walkIn ? 'Оформлен' : 'Принят',
+    'done',
+    order.createdAt,
+    order.createdBy?.name ?? null,
+  );
   const stages: Stage[] = [created];
 
   const phase = (done: boolean, current: boolean): StageState =>
@@ -109,22 +115,11 @@ export function buildFulfillmentProgress(
   );
 
   if (!walkIn) {
-    stages.push(
-      stage(
-        'ready',
-        'Готов',
-        phase(assemblyDone, false),
-        order.readyAt ?? null,
-      ),
-    );
+    stages.push(stage('ready', 'Готов', phase(assemblyDone, false), order.readyAt ?? null));
   }
 
   const completed = status === OrderStatus.COMPLETED;
-  const issuedLabel = walkIn
-    ? 'Выдан'
-    : delivery
-      ? 'Отпущен со склада'
-      : 'Выдан клиенту';
+  const issuedLabel = walkIn ? 'Выдан' : delivery ? 'Отпущен со склада' : 'Выдан клиенту';
   stages.push(
     stage(
       'issued',
@@ -189,9 +184,7 @@ function composeNextAction(args: {
     case OrderStatus.IN_PROGRESS: {
       const left = args.bouquetRequiredCount - args.bouquetAssembledCount;
       if (left > 0) {
-        parts.push(
-          `Собрать букеты: ${args.bouquetAssembledCount}/${args.bouquetRequiredCount}`,
-        );
+        parts.push(`Собрать букеты: ${args.bouquetAssembledCount}/${args.bouquetRequiredCount}`);
       } else if (args.productRequiredCount > args.productIssuedCount) {
         parts.push('Подготовить товары к выдаче');
       } else {

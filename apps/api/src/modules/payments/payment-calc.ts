@@ -74,10 +74,9 @@ export function computePaymentSummaryDecimals(
 
   let paymentProgressPercent = 0;
   if (netPaid.greaterThan(0)) {
-    paymentProgressPercent =
-      orderTotal.lessThanOrEqualTo(0)
-        ? 100
-        : Math.min(100, Math.floor(netPaid.div(orderTotal).mul(100).toNumber()));
+    paymentProgressPercent = orderTotal.lessThanOrEqualTo(0)
+      ? 100
+      : Math.min(100, Math.floor(netPaid.div(orderTotal).mul(100).toNumber()));
   }
 
   return {

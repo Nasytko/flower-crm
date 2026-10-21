@@ -61,7 +61,9 @@ export class CloseCashShiftDto {
 }
 
 export class CashMovementInputDto {
-  @ApiProperty({ enum: [CashMovementType.FLOAT_IN, CashMovementType.FLOAT_OUT, CashMovementType.ADJUSTMENT] })
+  @ApiProperty({
+    enum: [CashMovementType.FLOAT_IN, CashMovementType.FLOAT_OUT, CashMovementType.ADJUSTMENT],
+  })
   @IsEnum(CashMovementType)
   type!: CashMovementType;
 

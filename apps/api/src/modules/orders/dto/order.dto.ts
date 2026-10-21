@@ -375,7 +375,10 @@ export class OrderQueryDto {
   @Transform(({ value }) => value === true || value === 'true')
   includeWalkIn?: boolean;
 
-  @ApiPropertyOptional({ enum: OrderSource, description: 'Filter by order source (explicit filter keeps walk-in sales visible)' })
+  @ApiPropertyOptional({
+    enum: OrderSource,
+    description: 'Filter by order source (explicit filter keeps walk-in sales visible)',
+  })
   @IsOptional()
   @IsEnum(OrderSource)
   source?: OrderSource;

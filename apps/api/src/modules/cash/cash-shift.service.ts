@@ -43,7 +43,10 @@ function err(
 }
 
 /** Signed effect of a movement on drawer cash. */
-export function signedMovementAmount(type: CashMovementType, amount: Prisma.Decimal): Prisma.Decimal {
+export function signedMovementAmount(
+  type: CashMovementType,
+  amount: Prisma.Decimal,
+): Prisma.Decimal {
   switch (type) {
     case CashMovementType.SALE_IN:
     case CashMovementType.FLOAT_IN:
@@ -372,8 +375,12 @@ export class CashShiftService {
   private async lockShift(tx: Tx, id: string, mode: 'UPDATE' | 'SHARE') {
     const rows =
       mode === 'UPDATE'
-        ? await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM cash_shifts WHERE id = ${id} FOR UPDATE`
-        : await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM cash_shifts WHERE id = ${id} FOR SHARE`;
+        ? await tx.$queryRaw<
+            Array<{ id: string }>
+          >`SELECT id FROM cash_shifts WHERE id = ${id} FOR UPDATE`
+        : await tx.$queryRaw<
+            Array<{ id: string }>
+          >`SELECT id FROM cash_shifts WHERE id = ${id} FOR SHARE`;
     if (!rows[0]) throw this.notFound();
     // Re-read after the lock (READ COMMITTED sees the latest committed state).
     return tx.cashShift.findUniqueOrThrow({ where: { id } });
@@ -389,8 +396,7 @@ export class CashShiftService {
       where: { cashShiftId },
       _sum: { amount: true },
     });
-    const sum = (t: CashMovementType) =>
-      groups.find((g) => g.type === t)?._sum.amount ?? ZERO;
+    const sum = (t: CashMovementType) => groups.find((g) => g.type === t)?._sum.amount ?? ZERO;
     const saleIn = sum(CashMovementType.SALE_IN);
     const refundOut = sum(CashMovementType.REFUND_OUT);
     const floatIn = sum(CashMovementType.FLOAT_IN);

@@ -72,7 +72,10 @@ function PaymentList({ payments }: { payments: PaymentDto[] }): ReactElement | n
   return (
     <ul className="divide-y divide-border rounded-2xl border border-border">
       {payments.map((p) => (
-        <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
+        <li
+          key={p.id}
+          className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
+        >
           <div>
             <p className="font-medium">
               {p.kind === 'REFUND' ? 'Возврат' : 'Оплата'} · {PAYMENT_METHOD_LABELS_RU[p.method]}
@@ -84,7 +87,9 @@ function PaymentList({ payments }: { payments: PaymentDto[] }): ReactElement | n
               {p.status} · {new Date(p.createdAt).toLocaleString('ru-RU')} · {p.createdByName}
             </p>
           </div>
-          <p className="tabular-nums font-medium">{p.amount} {p.currency}</p>
+          <p className="tabular-nums font-medium">
+            {p.amount} {p.currency}
+          </p>
         </li>
       ))}
     </ul>
@@ -153,9 +158,7 @@ export function OrderProgress({ order }: { order: OrderDetail }): ReactElement {
         <p className="text-xs text-muted-foreground">
           Остаток к оплате: {pay.remainingDue} BYN
           {Number(pay.pendingAmount) > 0 ? ` · ожидает подтверждения: ${pay.pendingAmount}` : null}
-          {Number(pay.confirmedRefunded) > 0
-            ? ` · возвращено: ${pay.confirmedRefunded}`
-            : null}
+          {Number(pay.confirmedRefunded) > 0 ? ` · возвращено: ${pay.confirmedRefunded}` : null}
         </p>
         <PaymentList payments={order.payments} />
       </div>

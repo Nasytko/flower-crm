@@ -28,11 +28,7 @@ import {
   RefundPaymentDto,
 } from './dto/payment.dto';
 import { paymentInclude, toPaymentDto, type PaymentRow } from './payment-mapper';
-import {
-  computeOrderPaymentSummary,
-  computePaymentSummaryDecimals,
-  toMoney,
-} from './payment-calc';
+import { computeOrderPaymentSummary, computePaymentSummaryDecimals, toMoney } from './payment-calc';
 
 type Tx = Prisma.TransactionClient;
 
@@ -150,7 +146,10 @@ export class PaymentsService {
   ): Promise<ChargeResult> {
     const key = input.idempotencyKey.trim();
     if (key.length < 8) {
-      throw err('PAYMENT_INVALID_IDEMPOTENCY_KEY', 'idempotencyKey должен содержать минимум 8 символов');
+      throw err(
+        'PAYMENT_INVALID_IDEMPOTENCY_KEY',
+        'idempotencyKey должен содержать минимум 8 символов',
+      );
     }
     if (input.amount.lessThanOrEqualTo(0)) {
       throw err('PAYMENT_INVALID_AMOUNT', 'Сумма платежа должна быть больше нуля');
@@ -371,8 +370,9 @@ export class PaymentsService {
 
       let shiftId: string | null = null;
       if (payment.method === PaymentMethod.CASH) {
-        shiftId = (await this.cash.lockOpenShiftForPayment(tx, dto.cashShiftId ?? payment.cashShiftId))
-          .id;
+        shiftId = (
+          await this.cash.lockOpenShiftForPayment(tx, dto.cashShiftId ?? payment.cashShiftId)
+        ).id;
       }
 
       let updated: PaymentRow;
@@ -422,9 +422,7 @@ export class PaymentsService {
           kind: payment.kind,
           manual: true,
           paymentStatus: summary.paymentStatus,
-          overpaid:
-            payment.kind === PaymentKind.CHARGE &&
-            before.netPaid.greaterThan(order.total),
+          overpaid: payment.kind === PaymentKind.CHARGE && before.netPaid.greaterThan(order.total),
         },
         context,
         tx,
@@ -503,7 +501,10 @@ export class PaymentsService {
   ): Promise<PaymentMutationResultDto> {
     const key = dto.idempotencyKey.trim();
     if (key.length < 8) {
-      throw err('PAYMENT_INVALID_IDEMPOTENCY_KEY', 'idempotencyKey должен содержать минимум 8 символов');
+      throw err(
+        'PAYMENT_INVALID_IDEMPOTENCY_KEY',
+        'idempotencyKey должен содержать минимум 8 символов',
+      );
     }
     const requested = dto.amount ? this.positiveMoney(dto.amount) : null;
 

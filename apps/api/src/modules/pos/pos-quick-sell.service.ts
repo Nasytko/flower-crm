@@ -90,7 +90,12 @@ export class PosQuickSellService {
       throw err('POS_CART_NOT_FOUND', 'Корзина не найдена', {}, HttpStatus.NOT_FOUND);
     }
     if (cart.ownerUserId !== actor.id) {
-      throw new AppError('FORBIDDEN', 'Корзина принадлежит другому сотруднику', {}, HttpStatus.FORBIDDEN);
+      throw new AppError(
+        'FORBIDDEN',
+        'Корзина принадлежит другому сотруднику',
+        {},
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Fail before any state change when cash cannot be accepted.
@@ -265,7 +270,14 @@ export class PosQuickSellService {
           select: { version: true, status: true },
         });
         if (ord.status === OrderStatus.COMPLETED || ord.status === OrderStatus.CANCELLED) break;
-        await this.assembled.directIssueOrderItem(actor, orderId, item.id, left, ord.version, context);
+        await this.assembled.directIssueOrderItem(
+          actor,
+          orderId,
+          item.id,
+          left,
+          ord.version,
+          context,
+        );
         issued++;
       } catch (e) {
         warnings.push(`${item.nameSnapshot}: ${this.reason(e)}`);

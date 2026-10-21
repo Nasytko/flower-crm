@@ -468,7 +468,10 @@ export class QuickSellDto {
   @MaxLength(128)
   idempotencyKey!: string;
 
-  @ApiProperty({ type: [QuickSellPaymentDto], description: 'CONFIRMED CASH / CARD_TERMINAL payments' })
+  @ApiProperty({
+    type: [QuickSellPaymentDto],
+    description: 'CONFIRMED CASH / CARD_TERMINAL payments',
+  })
   @IsArray()
   @ArrayMaxSize(4)
   @ValidateNested({ each: true })
