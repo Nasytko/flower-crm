@@ -34,6 +34,7 @@ import {
   multiplyMoney,
   parseMoneyInput,
 } from '../products/product-mapper';
+import { isoDateFromDb, parseIsoDateOnly } from '../orders/business-time';
 
 type Tx = Prisma.TransactionClient;
 
@@ -204,6 +205,7 @@ export class SuppliesService {
               productId: item.productId,
               quantity: item.quantity,
               unitPurchasePrice: item.unitPurchasePrice,
+              usableUntil: item.usableUntil,
             })),
           },
         },
@@ -259,6 +261,7 @@ export class SuppliesService {
             productId: item.productId,
             quantity: item.quantity,
             unitPurchasePrice: item.unitPurchasePrice,
+            usableUntil: item.usableUntil,
           })),
         });
       }
@@ -375,6 +378,7 @@ export class SuppliesService {
               productId: item.productId,
               quantity: item.quantity,
               unitPurchasePrice: item.unitPurchasePrice,
+              usableUntil: item.usableUntil,
             })),
           },
         },
@@ -556,6 +560,7 @@ export class SuppliesService {
           remainingQuantity: item.quantity,
           unitPurchasePrice: item.unitPurchasePrice,
           receivedAt,
+          usableUntil: item.usableUntil ?? null,
         },
       });
 
@@ -846,10 +851,24 @@ export class SuppliesService {
           HttpStatus.BAD_REQUEST,
         );
       }
+      let usableUntil: Date | null = null;
+      if (item.usableUntil) {
+        try {
+          usableUntil = parseIsoDateOnly(item.usableUntil);
+        } catch {
+          throw new AppError(
+            'VALIDATION_ERROR',
+            'Некорректная дата пригодности',
+            { productId: item.productId, usableUntil: item.usableUntil },
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      }
       return {
         productId: item.productId,
         quantity: item.quantity,
         unitPurchasePrice,
+        usableUntil,
       };
     });
   }
@@ -960,6 +979,7 @@ export class SuppliesService {
         productId: string;
         quantity: number;
         unitPurchasePrice: Prisma.Decimal;
+        usableUntil?: Date | null;
         product: { name: string };
       }>;
       createdBy: { name: string };
@@ -977,6 +997,7 @@ export class SuppliesService {
         productId: item.productId,
         productName: item.product.name,
         quantity: item.quantity,
+        usableUntil: item.usableUntil ? isoDateFromDb(item.usableUntil) : null,
       };
       if (includePrices) {
         dto.unitPurchasePrice = decimalToMoneyString(item.unitPurchasePrice) ?? '0.00';

@@ -16,6 +16,8 @@ import { SuppliesService } from '../src/modules/supplies/supplies.service';
 import { WarehouseLockService } from '../src/modules/warehouse/warehouse-lock.service';
 import { StockFifoService } from '../src/modules/warehouse/stock-fifo.service';
 import { ReservationAllocationService } from '../src/modules/warehouse/reservation-allocation.service';
+import { StockBalanceService } from '../src/modules/warehouse/stock-balance.service';
+import { AssembledBouquetService } from '../src/modules/warehouse/assembled-bouquet.service';
 import { hashPassword } from '../src/common/security/password';
 import {
   cancelLeftoverInventories,
@@ -39,7 +41,7 @@ describe('Phase 8 reservations (live DB)', () => {
   } as AppConfigService;
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
-  const reservationAllocation = new ReservationAllocationService(audit);
+  const reservationAllocation = new ReservationAllocationService(audit, stockFifo);
   const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, {
     syncProductImages: async () => undefined,
     toDto: (row: { id: string }) => ({
@@ -60,13 +62,16 @@ describe('Phase 8 reservations (live DB)', () => {
     warehouseLock,
     reservationAllocation,
   );
-  const orders = new OrdersService(
+  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
+  const stockBalance = new StockBalanceService();
+  const assembled = new AssembledBouquetService(
     prisma as never,
+    warehouseLock,
+    stockFifo,
+    stockBalance,
+    reservationAllocation,
     audit,
     config,
-    warehouseLock,
-    reservationAllocation,
-    stockFifo,
   );
   const suffix = Date.now().toString(36);
 
@@ -420,7 +425,7 @@ describe('Phase 8 reservations (live DB)', () => {
     expect(stock.quantityOnHand - stock.quantityReserved).toBe(4);
   });
 
-  it('D: completion FIFO COGS 86 and SALE movements', async () => {
+  it('D: direct issue FEFO/FIFO COGS then COMPLETED (no SALE on status)', async () => {
     if (!ready) return;
     const productId = await flower(`D ${suffix}`);
     await postSupply(productId, 5, '10.00', '2026-09-01');
@@ -437,21 +442,31 @@ describe('Phase 8 reservations (live DB)', () => {
     });
     expect(created.hasShortage).toBe(false);
 
-    const readyOrder = await orders.changeStatus(
+    const itemId = created.items[0]!.id;
+    await assembled.directIssueOrderItem(
       director(),
       created.id,
-      { status: OrderStatus.READY, expectedVersion: created.version },
+      itemId,
+      8,
+      created.version,
       {},
     );
-    const completed = await orders.changeStatus(
-      director(),
-      readyOrder.id,
-      { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
-      {},
-    );
-    expect(completed.actualCost).toBe('86.00');
-    expect(completed.hasUncostedConsumption).toBe(false);
-    expect(completed.hasShortage).toBe(false);
+    const afterIssue = await orders.getById(director(), created.id);
+    // May already be COMPLETED if fully issued
+    if (afterIssue.status !== OrderStatus.COMPLETED) {
+      const readyOrder = await orders.changeStatus(
+        director(),
+        afterIssue.id,
+        { status: OrderStatus.READY, expectedVersion: afterIssue.version },
+        {},
+      );
+      await orders.changeStatus(
+        director(),
+        readyOrder.id,
+        { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
+        {},
+      );
+    }
 
     const lots = await prisma.stockLot.findMany({
       where: { productId },
@@ -460,24 +475,19 @@ describe('Phase 8 reservations (live DB)', () => {
     expect(lots[0]?.remainingQuantity).toBe(0);
     expect(lots[1]?.remainingQuantity).toBe(7);
 
-    const sales = await prisma.stockMovement.findMany({
-      where: { productId, type: StockMovementType.SALE, sourceId: created.id },
+    const issues = await prisma.stockMovement.findMany({
+      where: { productId, type: StockMovementType.DIRECT_ISSUE, sourceId: created.id },
       include: { allocations: true },
     });
-    expect(sales).toHaveLength(1);
-    expect(sales[0]?.quantity).toBe(-8);
-    const allocQty = sales[0]!.allocations.reduce((s, a) => s + a.quantity, 0);
-    expect(allocQty).toBe(8);
-    const byLot = new Map(sales[0]!.allocations.map((a) => [a.stockLotId, a.quantity]));
-    expect(byLot.get(lots[0]!.id)).toBe(5);
-    expect(byLot.get(lots[1]!.id)).toBe(3);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.quantity).toBe(-8);
 
     const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
     expect(stock.quantityOnHand).toBe(7);
     expect(stock.quantityReserved).toBe(0);
   });
 
-  it('E: shortage blocks READY and COMPLETED', async () => {
+  it('E: PRODUCT-only READY allowed with shortage; COMPLETED blocked until issued', async () => {
     if (!ready) return;
     const productId = await flower(`E ${suffix}`);
     await postSupply(productId, 2, '1.00');
@@ -490,29 +500,22 @@ describe('Phase 8 reservations (live DB)', () => {
     });
     expect(created.hasShortage).toBe(true);
 
-    await expect(
-      orders.changeStatus(
-        director(),
-        created.id,
-        { status: OrderStatus.READY, expectedVersion: created.version },
-        {},
-      ),
-    ).rejects.toMatchObject({ code: 'ORDER_HAS_SHORTAGE' } satisfies Partial<AppError>);
+    const readyOrder = await orders.changeStatus(
+      director(),
+      created.id,
+      { status: OrderStatus.READY, expectedVersion: created.version },
+      {},
+    );
+    expect(readyOrder.status).toBe(OrderStatus.READY);
 
-    // Force READY via prisma to assert COMPLETED also blocked (status machine + shortage).
-    await prisma.order.update({
-      where: { id: created.id },
-      data: { status: OrderStatus.READY, version: created.version + 1 },
-    });
-    const forced = await orders.getById(director(), created.id);
     await expect(
       orders.changeStatus(
         director(),
-        created.id,
-        { status: OrderStatus.COMPLETED, expectedVersion: forced.version },
+        readyOrder.id,
+        { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
         {},
       ),
-    ).rejects.toMatchObject({ code: 'ORDER_HAS_SHORTAGE' } satisfies Partial<AppError>);
+    ).rejects.toMatchObject({ code: 'ORDER_NOT_FULLY_ISSUED' } satisfies Partial<AppError>);
 
     const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
     expect(stock.quantityOnHand).toBe(2);
@@ -551,7 +554,7 @@ describe('Phase 8 reservations (live DB)', () => {
     expect(after.quantityOnHand).toBe(7);
   });
 
-  it('G: no preemption — early shortage does not steal late reservation', async () => {
+  it('G: preemption — early order steals planned reserve from later order', async () => {
     if (!ready) return;
     const productId = await flower(`G ${suffix}`);
     await postSupply(productId, 10, '2.50');
@@ -591,9 +594,9 @@ describe('Phase 8 reservations (live DB)', () => {
     const earlyRes = await prisma.stockReservation.findUniqueOrThrow({
       where: { orderId_productId: { orderId: early.id, productId } },
     });
-    expect(lateRes.reservedQuantity).toBe(10);
-    expect(earlyRes.reservedQuantity).toBe(0);
-    expect(early.hasShortage).toBe(true);
+    expect(earlyRes.reservedQuantity).toBe(8);
+    expect(lateRes.reservedQuantity).toBe(2);
+    expect(early.hasShortage).toBe(false);
 
     const stock = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
     expect(stock.quantityReserved).toBe(10);

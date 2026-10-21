@@ -24,12 +24,17 @@ import {
   OrderQueryDto,
   UpdateOrderDto,
 } from './dto/order.dto';
+import { AssembledBouquetService } from '../warehouse/assembled-bouquet.service';
+import { DirectIssueDto } from '../warehouse/dto/assembled-bouquet.dto';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly assembledBouquets: AssembledBouquetService,
+  ) {}
 
   @Get('business-time')
   @RequirePermissions(Permission.ORDERS_VIEW)
@@ -90,6 +95,28 @@ export class OrdersController {
     @Req() request: Request,
   ) {
     return this.orders.changeStatus(actor, id, dto, this.contextFrom(request));
+  }
+
+  @Post(':id/direct-issue')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.ORDERS_ISSUE)
+  @ApiOperation({
+    summary: 'Direct-issue PRODUCT line flowers/goods without assembling a bouquet',
+  })
+  directIssue(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: DirectIssueDto,
+    @Req() request: Request,
+  ) {
+    return this.assembledBouquets.directIssueOrderItem(
+      actor,
+      id,
+      dto.orderItemId,
+      dto.quantity,
+      dto.expectedOrderVersion,
+      this.contextFrom(request),
+    );
   }
 
   private contextFrom(request: Request) {

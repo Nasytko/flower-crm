@@ -49,7 +49,12 @@ type FulfillmentFilter = 'all' | FulfillmentType;
 type TimePreset = 'all' | 'without' | 'morning' | 'afternoon' | 'evening';
 type SearchScope = 'all' | 'day';
 
-const KANBAN_STATUSES = [OrderStatus.NEW, OrderStatus.READY, OrderStatus.COMPLETED] as const;
+const KANBAN_STATUSES = [
+  OrderStatus.NEW,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.READY,
+  OrderStatus.COMPLETED,
+] as const;
 
 const TIME_PRESETS: Record<
   Exclude<TimePreset, 'all' | 'without'>,
@@ -119,6 +124,7 @@ function attentionLabel(attention: OrderListItem['attention']): string | null {
 function columnTitle(status: OrderStatus, fulfillmentType: FulfillmentFilter): string {
   if (fulfillmentType === 'all') {
     if (status === OrderStatus.NEW) return 'Новые';
+    if (status === OrderStatus.IN_PROGRESS) return 'В сборке';
     if (status === OrderStatus.READY) return 'Готовы';
     return 'Завершённые';
   }
@@ -127,11 +133,12 @@ function columnTitle(status: OrderStatus, fulfillmentType: FulfillmentFilter): s
       ? FulfillmentType.DELIVERY
       : FulfillmentType.PICKUP;
   if (status === OrderStatus.NEW) return 'Новые';
+  if (status === OrderStatus.IN_PROGRESS) return 'В сборке';
   return orderStatusLabelRu(status, sample);
 }
 
 function primaryStatusAction(order: OrderListItem): { status: OrderStatus; label: string } | null {
-  if (order.status === OrderStatus.NEW) {
+  if (order.status === OrderStatus.NEW || order.status === OrderStatus.IN_PROGRESS) {
     return {
       status: OrderStatus.READY,
       label:
@@ -248,12 +255,14 @@ export function OrdersKanbanPage(): ReactElement {
   const byStatus = useMemo(() => {
     const map: Record<(typeof KANBAN_STATUSES)[number], OrderListItem[]> = {
       [OrderStatus.NEW]: [],
+      [OrderStatus.IN_PROGRESS]: [],
       [OrderStatus.READY]: [],
       [OrderStatus.COMPLETED]: [],
     };
     for (const item of orderItems ?? []) {
       if (
         item.status === OrderStatus.NEW ||
+        item.status === OrderStatus.IN_PROGRESS ||
         item.status === OrderStatus.READY ||
         item.status === OrderStatus.COMPLETED
       ) {
@@ -335,6 +344,7 @@ export function OrdersKanbanPage(): ReactElement {
       !targetStatus ||
       targetStatus === order.status ||
       (targetStatus !== OrderStatus.NEW &&
+        targetStatus !== OrderStatus.IN_PROGRESS &&
         targetStatus !== OrderStatus.READY &&
         targetStatus !== OrderStatus.COMPLETED)
     ) {

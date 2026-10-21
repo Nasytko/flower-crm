@@ -39,7 +39,7 @@ describe('Orders concurrency (live DB)', () => {
   } as AppConfigService;
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
-  const reservationAllocation = new ReservationAllocationService(audit);
+  const reservationAllocation = new ReservationAllocationService(audit, stockFifo);
   const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, {
     syncProductImages: async () => undefined,
     toDto: (row: { id: string }) => ({
@@ -61,14 +61,7 @@ describe('Orders concurrency (live DB)', () => {
     reservationAllocation,
   );
   const bouquets = new BouquetsService(prisma as never, audit);
-  const orders = new OrdersService(
-    prisma as never,
-    audit,
-    config,
-    warehouseLock,
-    reservationAllocation,
-    stockFifo,
-  );
+  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
   const suffix = Date.now().toString(36);
 
   let directorId = '';
@@ -354,27 +347,19 @@ describe('Orders concurrency (live DB)', () => {
     const again = await orders.getById(director(), created.id);
     expect(again.items[0]?.components[0]?.quantityPerItem).toBe(3);
 
-    const readyOrder = await orders.changeStatus(
-      director(),
-      created.id,
-      { status: OrderStatus.READY, expectedVersion: again.version },
-      {},
-    );
-    await orders.changeStatus(
-      director(),
-      created.id,
-      { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
-      {},
-    );
+    // READY requires physical assembly of bouquet lines — reserve snapshot still frozen.
+    await expect(
+      orders.changeStatus(
+        director(),
+        created.id,
+        { status: OrderStatus.READY, expectedVersion: again.version },
+        {},
+      ),
+    ).rejects.toMatchObject({ code: 'ORDER_NOT_FULLY_ASSEMBLED' });
 
     const stockAfter = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
-    expect(stockAfter.quantityOnHand).toBe(stockBefore.quantityOnHand - 6);
-    expect(stockAfter.quantityReserved).toBe(0);
-    expect(
-      await prisma.stockMovement.count({
-        where: { productId, type: StockMovementType.SALE, sourceId: created.id },
-      }),
-    ).toBe(1);
+    expect(stockAfter.quantityOnHand).toBe(stockBefore.quantityOnHand);
+    expect(stockAfter.quantityReserved).toBe(6);
   });
 
   it('allows only one concurrent status transition at same expectedVersion', async () => {
@@ -404,7 +389,7 @@ describe('Orders concurrency (live DB)', () => {
       orders.changeStatus(
         director(),
         created.id,
-        { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
+        { status: OrderStatus.IN_PROGRESS, expectedVersion: readyOrder.version },
         {},
       ),
       orders.changeStatus(
@@ -424,6 +409,6 @@ describe('Orders concurrency (live DB)', () => {
     });
     const final = await orders.getById(director(), created.id);
     expect(final.version).toBe(readyOrder.version + 1);
-    expect([OrderStatus.COMPLETED, OrderStatus.CANCELLED]).toContain(final.status);
+    expect([OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED]).toContain(final.status);
   });
 });

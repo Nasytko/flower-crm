@@ -38,6 +38,8 @@ interface LineDraft {
   productId: string;
   quantity: string;
   unitPurchasePrice: string;
+  /** YYYY-MM-DD or empty = unknown expiry */
+  usableUntil: string;
 }
 
 function todayIso(): string {
@@ -76,7 +78,8 @@ export function SupplyEditor({
       productId: item.productId,
       quantity: String(item.quantity),
       unitPurchasePrice: item.unitPurchasePrice ?? '',
-    })) ?? [{ key: '1', productId: '', quantity: '1', unitPurchasePrice: '' }],
+      usableUntil: item.usableUntil ?? '',
+    })) ?? [{ key: '1', productId: '', quantity: '1', unitPurchasePrice: '', usableUntil: '' }],
   );
   const [error, setError] = useState<string | null>(null);
   const [confirmPost, setConfirmPost] = useState(false);
@@ -142,6 +145,7 @@ export function SupplyEditor({
           productId: l.productId,
           quantity: Number.parseInt(l.quantity, 10),
           unitPurchasePrice: l.unitPurchasePrice.trim().replace(',', '.'),
+          usableUntil: l.usableUntil.trim() ? l.usableUntil.trim() : null,
         }));
       if (items.length === 0) {
         throw new ApiClientError(400, {
@@ -232,6 +236,7 @@ export function SupplyEditor({
         productId: '',
         quantity: '1',
         unitPurchasePrice: '',
+        usableUntil: '',
       },
     ]);
   };
@@ -416,6 +421,7 @@ export function SupplyEditor({
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-3 py-3 font-medium">Кол-во</th>
                 <th className="px-3 py-3 font-medium">Закупочная</th>
+                <th className="px-3 py-3 font-medium">Годен до</th>
                 <th className="px-3 py-3 font-medium">Сумма</th>
                 <th className="px-5 py-3 font-medium" />
               </tr>
@@ -450,6 +456,14 @@ export function SupplyEditor({
                       placeholder="5.20"
                       value={line.unitPurchasePrice}
                       onChange={(e) => updateLine(line.key, { unitPurchasePrice: e.target.value })}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <Input
+                      type="date"
+                      value={line.usableUntil}
+                      title="Пусто = срок неизвестен (оценка 3 дня от поступления)"
+                      onChange={(e) => updateLine(line.key, { usableUntil: e.target.value })}
                     />
                   </td>
                   <td className="px-3 py-3 tabular-nums">
@@ -520,6 +534,17 @@ export function SupplyEditor({
                     value={line.unitPurchasePrice}
                     onChange={(e) => updateLine(line.key, { unitPurchasePrice: e.target.value })}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Годен до</Label>
+                  <Input
+                    type="date"
+                    value={line.usableUntil}
+                    onChange={(e) => updateLine(line.key, { usableUntil: e.target.value })}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Пусто — срок неизвестен (для резервов оценка: +3 дня от поступления)
+                  </p>
                 </div>
               </div>
               <p className="text-sm tabular-nums text-muted-foreground">

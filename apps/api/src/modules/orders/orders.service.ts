@@ -8,7 +8,7 @@ import {
   Permission,
   ProductType,
   Role,
-  StockMovementType,
+  AssembledBouquetStatus,
   Unit,
   roleHasPermission,
   type BusinessTimeInfo,
@@ -26,7 +26,6 @@ import { AuditService } from '../audit/audit.service';
 import { AppConfigService } from '../../config/app-config.service';
 import { WarehouseLockService } from '../warehouse/warehouse-lock.service';
 import { ReservationAllocationService } from '../warehouse/reservation-allocation.service';
-import { StockFifoService } from '../warehouse/stock-fifo.service';
 import { decimalToMoneyString, parseMoneyInput } from '../products/product-mapper';
 import {
   businessDateString,
@@ -52,10 +51,21 @@ const orderInclude = {
     include: {
       components: { orderBy: { sortOrder: 'asc' as const } },
       product: { select: { type: true, name: true } },
+      assembledBouquets: {
+        select: { id: true, status: true },
+      },
     },
     orderBy: { sortOrder: 'asc' as const },
   },
   reservations: true,
+  assembledBouquets: {
+    where: { status: AssembledBouquetStatus.ASSEMBLED },
+    include: {
+      assembledBy: { select: { name: true } },
+      order: { select: { number: true } },
+    },
+    orderBy: { assembledAt: 'desc' as const },
+  },
   createdBy: { select: { id: true, name: true } },
   updatedBy: { select: { id: true, name: true } },
 } satisfies Prisma.OrderInclude;
@@ -88,7 +98,6 @@ export class OrdersService {
     private readonly config: AppConfigService,
     private readonly warehouseLock: WarehouseLockService,
     private readonly reservationAllocation: ReservationAllocationService,
-    private readonly stockFifo: StockFifoService,
   ) {}
 
   businessTime(now = new Date()): BusinessTimeInfo {
@@ -166,6 +175,7 @@ export class OrdersService {
 
     const byStatus: Record<OrderStatus, number> = {
       NEW: 0,
+      IN_PROGRESS: 0,
       READY: 0,
       COMPLETED: 0,
       CANCELLED: 0,
@@ -510,7 +520,7 @@ export class OrdersService {
         this.assertTransition(existing.status as OrderStatus, dto.status);
 
         if (dto.status === OrderStatus.READY) {
-          await this.reservationAllocation.assertNoShortage(tx, id);
+          await this.assertAssembleableReady(tx, id);
         }
 
         if (dto.status === OrderStatus.CANCELLED || dto.status === OrderStatus.COMPLETED) {
@@ -518,7 +528,7 @@ export class OrdersService {
         }
 
         if (dto.status === OrderStatus.COMPLETED) {
-          await this.reservationAllocation.assertNoShortage(tx, id);
+          await this.assertOrderReadyToComplete(tx, id);
         }
 
         const now = new Date();
@@ -527,10 +537,12 @@ export class OrdersService {
           status: dto.status,
           updatedByUserId: actor.id,
         };
+        if (dto.status === OrderStatus.IN_PROGRESS) data.inProgressAt = existing.inProgressAt ?? now;
         if (dto.status === OrderStatus.READY) data.readyAt = now;
         if (dto.status === OrderStatus.COMPLETED) data.completedAt = now;
         if (dto.status === OrderStatus.CANCELLED) data.cancelledAt = now;
         if (dto.status === OrderStatus.NEW) {
+          data.inProgressAt = null;
           data.readyAt = null;
           data.completedAt = null;
           data.cancelledAt = null;
@@ -554,11 +566,12 @@ export class OrdersService {
         }
 
         if (dto.status === OrderStatus.CANCELLED) {
+          // Release planned reserve only. Assembled bouquets stay physical — no auto-disassemble.
           await this.reservationAllocation.releaseAllForOrder(tx, id, { reallocate: true });
         }
 
         if (dto.status === OrderStatus.COMPLETED) {
-          await this.consumeReservationsOnComplete(tx, existing, actor.id);
+          await this.reservationAllocation.releaseAllForOrder(tx, id, { reallocate: true });
         }
 
         const row = await tx.order.findUniqueOrThrow({ where: { id }, include: orderInclude });
@@ -603,117 +616,91 @@ export class OrdersService {
     );
   }
 
-  /** FIFO-consume reserved stock on COMPLETED; sets actualCost / hasUncostedConsumption. */
-  private async consumeReservationsOnComplete(
-    tx: Tx,
-    order: Pick<OrderRow, 'id' | 'number'>,
-    actorUserId: string,
-  ): Promise<void> {
-    const reservations = await tx.stockReservation.findMany({
-      where: { orderId: order.id },
-      orderBy: { productId: 'asc' },
-    });
-    if (reservations.length === 0) {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { actualCost: new Prisma.Decimal(0), hasUncostedConsumption: false },
-      });
-      return;
-    }
-
-    const productIds = reservations.map((r) => r.productId);
-    await this.reservationAllocation.lockProductStocks(tx, productIds);
-
-    let knownCost = new Prisma.Decimal(0);
-    let hasUncosted = false;
-
-    let consumedProductCount = 0;
-    for (const reservation of reservations) {
-      const qty = reservation.reservedQuantity;
-      if (qty > 0) {
-        const fifo = await this.stockFifo.consumeLots(tx, reservation.productId, qty, {
-          requireFullCoverage: true,
-        });
-        if (fifo.hasUncosted) {
-          hasUncosted = true;
-        } else {
-          knownCost = knownCost.plus(fifo.knownCost);
-        }
-
-        const stock = await tx.productStock.findUniqueOrThrow({
-          where: { productId: reservation.productId },
-        });
-        const nextOnHand = stock.quantityOnHand - qty;
-        const nextReserved = stock.quantityReserved - qty;
-        if (nextOnHand < 0 || nextReserved < 0 || nextReserved > nextOnHand) {
-          throw new AppError(
-            'RESERVATION_INVARIANT_VIOLATION',
-            'Нарушение инварианта резерва при завершении заказа',
-            {
-              productId: reservation.productId,
-              quantityOnHand: stock.quantityOnHand,
-              quantityReserved: stock.quantityReserved,
-              consume: qty,
-            },
-            HttpStatus.CONFLICT,
-          );
-        }
-
-        await tx.productStock.update({
-          where: { productId: reservation.productId },
-          data: { quantityOnHand: nextOnHand, quantityReserved: nextReserved },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            productId: reservation.productId,
-            type: StockMovementType.SALE,
-            quantity: -qty,
-            balanceAfter: nextOnHand,
-            sourceType: 'Order',
-            sourceId: order.id,
-            comment: `Заказ ${order.number}`,
-            createdByUserId: actorUserId,
-            allocations: {
-              create: fifo.allocations.map((a) => ({
-                stockLotId: a.stockLotId,
-                quantity: a.quantity,
-                unitPurchasePrice: a.unitPurchasePrice,
-              })),
-            },
+  /** All bouquet lines fully assembled (ASSEMBLED or ISSUED). */
+  private async assertAssembleableReady(tx: Tx, orderId: string): Promise<void> {
+    const items = await tx.orderItem.findMany({ where: { orderId } });
+    for (const item of items) {
+      if (item.itemType !== OrderItemType.BOUQUET) continue;
+      const count = await tx.assembledBouquet.count({
+        where: {
+          orderItemId: item.id,
+          status: {
+            in: [AssembledBouquetStatus.ASSEMBLED, AssembledBouquetStatus.ISSUED],
           },
-        });
-
-        consumedProductCount += 1;
-        // Test-only: force mid-completion failure after first product for rollback coverage.
-        if (process.env.ORDER_COMPLETION_FAIL_AFTER_FIRST === '1' && consumedProductCount === 1) {
-          throw new AppError(
-            'ORDER_COMPLETION_TEST_FAILURE',
-            'Test-forced completion failure after first product',
-            { orderId: order.id, productId: reservation.productId },
-            HttpStatus.INTERNAL_SERVER_ERROR,
-          );
-        }
+        },
+      });
+      if (count < item.quantity) {
+        throw new AppError(
+          'ORDER_NOT_FULLY_ASSEMBLED',
+          'Не все букеты заказа собраны',
+          { orderItemId: item.id, need: item.quantity, assembled: count },
+          HttpStatus.CONFLICT,
+        );
       }
-
-      await tx.stockReservation.delete({ where: { id: reservation.id } });
     }
+  }
 
-    await tx.order.update({
-      where: { id: order.id },
-      data: {
-        actualCost: hasUncosted ? null : knownCost.toDecimalPlaces(2),
-        hasUncostedConsumption: hasUncosted,
-      },
+  /**
+   * COMPLETED requires physical leave-shop already done via issue / direct-issue APIs.
+   * No auto SALE of planned reserve (legacy path removed).
+   */
+  private async assertOrderReadyToComplete(tx: Tx, orderId: string): Promise<void> {
+    const left = await tx.assembledBouquet.count({
+      where: { orderId, status: AssembledBouquetStatus.ASSEMBLED },
     });
+    if (left > 0) {
+      throw new AppError(
+        'ORDER_HAS_UNISSUED_BOUQUETS',
+        'Сначала выдайте собранные букеты, затем завершите заказ',
+        { remainingAssembled: left },
+        HttpStatus.CONFLICT,
+      );
+    }
+    const items = await tx.orderItem.findMany({ where: { orderId } });
+    for (const item of items) {
+      if (item.quantityIssued < item.quantity) {
+        // Bouquet lines may count ISSUED bouquets instead of quantityIssued
+        if (item.itemType === OrderItemType.BOUQUET) {
+          const issued = await tx.assembledBouquet.count({
+            where: {
+              orderItemId: item.id,
+              status: {
+                in: [AssembledBouquetStatus.ISSUED, AssembledBouquetStatus.WRITTEN_OFF],
+              },
+            },
+          });
+          if (issued >= item.quantity) continue;
+        }
+        throw new AppError(
+          'ORDER_NOT_FULLY_ISSUED',
+          'Не все позиции заказа выданы',
+          { orderItemId: item.id, quantity: item.quantity, quantityIssued: item.quantityIssued },
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
   }
 
   private assertTransition(from: OrderStatus, to: OrderStatus): void {
     const allowed: Record<OrderStatus, OrderStatus[]> = {
-      NEW: [OrderStatus.READY, OrderStatus.CANCELLED],
-      READY: [OrderStatus.COMPLETED, OrderStatus.NEW, OrderStatus.CANCELLED],
-      COMPLETED: [],
-      CANCELLED: [],
+      [OrderStatus.NEW]: [
+        OrderStatus.IN_PROGRESS,
+        OrderStatus.READY,
+        OrderStatus.CANCELLED,
+      ],
+      [OrderStatus.IN_PROGRESS]: [
+        OrderStatus.READY,
+        OrderStatus.NEW,
+        OrderStatus.CANCELLED,
+      ],
+      [OrderStatus.READY]: [
+        OrderStatus.COMPLETED,
+        OrderStatus.IN_PROGRESS,
+        OrderStatus.NEW,
+        OrderStatus.CANCELLED,
+      ],
+      [OrderStatus.COMPLETED]: [],
+      [OrderStatus.CANCELLED]: [],
     };
     if (!allowed[from].includes(to)) {
       throw new AppError(
@@ -1293,7 +1280,9 @@ export class OrdersService {
     }
     const date = isoDateFromDb(row.fulfillmentDate);
     if (date < businessDate) {
-      return row.status === OrderStatus.NEW || row.status === OrderStatus.READY
+      return row.status === OrderStatus.NEW ||
+        row.status === OrderStatus.IN_PROGRESS ||
+        row.status === OrderStatus.READY
         ? 'past_date'
         : 'none';
     }
@@ -1301,7 +1290,9 @@ export class OrdersService {
     if (!row.fulfillmentTimeFrom) return 'none';
     const deadline = row.fulfillmentTimeTo ?? row.fulfillmentTimeFrom;
     if (compareHm(businessHm, deadline) > 0) {
-      return row.status === OrderStatus.NEW ? 'overdue' : 'attention';
+      return row.status === OrderStatus.NEW || row.status === OrderStatus.IN_PROGRESS
+        ? 'overdue'
+        : 'attention';
     }
     return 'none';
   }
@@ -1407,17 +1398,28 @@ export class OrdersService {
       actor.role as Role,
       Permission.PURCHASE_PRICE_VIEW,
     );
+    // Detail requirements reflect open (unassembled) needs via reservation rows.
     const requirementsRaw = this.reservationAllocation.toRequirementDtos(
-      this.reservationAllocation.buildRequirementsFromItems(row.items),
+      new Map(
+        row.reservations.map((r) => [
+          r.productId,
+          {
+            productId: r.productId,
+            productName:
+              row.items
+                .flatMap((i) => i.components)
+                .find((c) => c.productId === r.productId)?.productNameSnapshot ??
+              row.items.find((i) => i.productId === r.productId)?.nameSnapshot ??
+              r.productId,
+            required: r.requiredQuantity,
+          },
+        ]),
+      ),
       row.reservations,
     );
     const requirements =
       (row.status as OrderStatus) === OrderStatus.COMPLETED
-        ? requirementsRaw.map((r) => ({
-            ...r,
-            reservedQuantity: r.requiredQuantity,
-            shortageQuantity: 0,
-          }))
+        ? []
         : (row.status as OrderStatus) === OrderStatus.CANCELLED
           ? []
           : requirementsRaw;
@@ -1432,6 +1434,23 @@ export class OrdersService {
         grossProfit = decimalToMoneyString(row.total.minus(row.actualCost!));
       }
     }
+
+    const canSeeCost = canViewPurchasePrice;
+    const assembledBouquets = (row.assembledBouquets ?? []).map((b) => ({
+      id: b.id,
+      number: b.number,
+      status: b.status as AssembledBouquetStatus,
+      orderId: b.orderId,
+      orderNumber: b.order?.number ?? row.number,
+      orderItemId: b.orderItemId,
+      bouquetTemplateId: b.bouquetTemplateId,
+      nameSnapshot: b.nameSnapshot,
+      version: b.version,
+      unitCost: canSeeCost ? decimalToMoneyString(b.unitCost) : null,
+      hasUncostedComponents: b.hasUncostedComponents,
+      assembledAt: b.assembledAt.toISOString(),
+      assembledByName: b.assembledBy?.name ?? '',
+    }));
 
     return {
       ...list,
@@ -1454,12 +1473,14 @@ export class OrdersService {
       createdByName: row.createdBy.name,
       updatedByUserId: row.updatedByUserId,
       updatedByName: row.updatedBy?.name ?? null,
+      inProgressAt: row.inProgressAt?.toISOString() ?? null,
       readyAt: row.readyAt?.toISOString() ?? null,
       completedAt: row.completedAt?.toISOString() ?? null,
       cancelledAt: row.cancelledAt?.toISOString() ?? null,
       updatedAt: row.updatedAt.toISOString(),
       items: row.items.map((item) => this.toItemDto(item)),
       requirements,
+      assembledBouquets,
     };
   }
 
@@ -1475,6 +1496,9 @@ export class OrdersService {
       sortOrder: c.sortOrder,
     }));
     const itemType = item.itemType as OrderItemType;
+    const quantityAssembled = (item.assembledBouquets ?? []).filter(
+      (b) => b.status === AssembledBouquetStatus.ASSEMBLED,
+    ).length;
     return {
       id: item.id,
       itemType,
@@ -1482,6 +1506,8 @@ export class OrdersService {
       bouquetId: item.bouquetId,
       nameSnapshot: item.nameSnapshot,
       quantity: item.quantity,
+      quantityIssued: item.quantityIssued,
+      quantityAssembled,
       unitPrice: decimalToMoneyString(item.unitPrice) ?? '0.00',
       lineSubtotal: decimalToMoneyString(item.lineSubtotal) ?? '0.00',
       sortOrder: item.sortOrder,

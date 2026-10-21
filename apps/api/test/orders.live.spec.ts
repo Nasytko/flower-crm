@@ -42,7 +42,7 @@ describe('Phase 7 orders domain (live DB)', () => {
   } as AppConfigService;
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
-  const reservationAllocation = new ReservationAllocationService(audit);
+  const reservationAllocation = new ReservationAllocationService(audit, stockFifo);
   const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, {
     syncProductImages: async () => undefined,
     toDto: (row: { id: string }) => ({
@@ -64,14 +64,7 @@ describe('Phase 7 orders domain (live DB)', () => {
     reservationAllocation,
   );
   const bouquets = new BouquetsService(prisma as never, audit);
-  const orders = new OrdersService(
-    prisma as never,
-    audit,
-    config,
-    warehouseLock,
-    reservationAllocation,
-    stockFifo,
-  );
+  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
   const suffix = Date.now().toString(36);
 
   let directorId = '';
@@ -536,11 +529,12 @@ describe('Phase 7 orders domain (live DB)', () => {
       {},
     );
 
+    // COMPLETED now requires prior issue; race CANCELLED vs IN_PROGRESS for CAS.
     const race = await Promise.allSettled([
       orders.changeStatus(
         manager(),
         created.id,
-        { status: OrderStatus.COMPLETED, expectedVersion: ready2.version },
+        { status: OrderStatus.IN_PROGRESS, expectedVersion: ready2.version },
         {},
       ),
       orders.changeStatus(
@@ -557,28 +551,11 @@ describe('Phase 7 orders domain (live DB)', () => {
     });
 
     const terminal = await orders.getById(director(), created.id);
-    expect([OrderStatus.COMPLETED, OrderStatus.CANCELLED]).toContain(terminal.status);
-    await expectReject(
-      orders.changeStatus(
-        director(),
-        created.id,
-        { status: OrderStatus.NEW, expectedVersion: terminal.version },
-        {},
-      ),
-      'ORDER_INVALID_STATUS_TRANSITION',
-    );
+    expect([OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED]).toContain(terminal.status);
 
     const stockAfter = await prisma.productStock.findUniqueOrThrow({ where: { productId } });
-    if (terminal.status === OrderStatus.COMPLETED) {
-      expect(stockAfter.quantityOnHand).toBe(stockBefore.quantityOnHand - 1);
-      expect(stockAfter.quantityReserved).toBe(0);
-      expect(
-        await prisma.stockMovement.count({
-          where: { productId, type: StockMovementType.SALE, sourceId: created.id },
-        }),
-      ).toBe(1);
-    } else {
-      expect(stockAfter.quantityOnHand).toBe(stockBefore.quantityOnHand);
+    expect(stockAfter.quantityOnHand).toBe(stockBefore.quantityOnHand);
+    if (terminal.status === OrderStatus.CANCELLED) {
       expect(stockAfter.quantityReserved).toBe(0);
     }
   });

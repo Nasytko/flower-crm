@@ -61,6 +61,16 @@ enum StockMovementType {
   RETURN
   INVENTORY_ADJUSTMENT
   MANUAL_ADJUSTMENT
+  /// Move unassembled stems into a physical assembled bouquet (onHand ↓, inBouquets ↑).
+  ASSEMBLE
+  /// Return fit stems from a bouquet back to unassembled stock.
+  DISASSEMBLE_RETURN
+  /// Write off damaged stems while disassembling / adjusting a bouquet.
+  DISASSEMBLE_DAMAGE
+  /// Final leave-shop of stems that were inside an assembled bouquet.
+  ISSUE
+  /// Direct leave-shop of unassembled product (no AssembledBouquet).
+  DIRECT_ISSUE
 }
 
 enum SupplyStatus {
@@ -117,6 +127,11 @@ model User {
   trustedDevicesCreated    TrustedDevice[]    @relation("TrustedDeviceCreator")
   workSessionsOpened       WorkSession[]      @relation("WorkSessionOpener")
   deviceAllowlistEntries   TrustedDeviceUser[]
+  assembledBouquets        AssembledBouquet[] @relation("AssembledBouquetAssembler")
+  disassembledBouquets     AssembledBouquet[] @relation("AssembledBouquetDisassembler")
+  issuedBouquets           AssembledBouquet[] @relation("AssembledBouquetIssuer")
+  writtenOffBouquets       AssembledBouquet[] @relation("AssembledBouquetWriteOff")
+  adjustedBouquets         AssembledBouquet[] @relation("AssembledBouquetAdjuster")
 
   @@index([role, isActive])
   @@index([pinEnabled, isActive])
@@ -337,6 +352,7 @@ model Product {
   orderItemsAsProduct OrderItem[] @relation("OrderItemProduct")
   orderItemComponents OrderItemComponent[]
   stockReservations   StockReservation[]
+  assembledComponents AssembledBouquetComponent[]
 
   @@index([type, isActive])
   @@index([name])
@@ -348,11 +364,23 @@ model Product {
 }
 
 /// Current warehouse snapshot for FLOWER products only (1:1).
+/// Single storage location today; do not merge multi-site stocks without an explicit transfer.
+///
+/// Formulas (no double-count):
+///   available = quantityOnHand − quantityReserved
+///   unassembledPhysical = quantityOnHand (= available + plannedReserve)
+///   totalPhysical = quantityOnHand + quantityInBouquets
+///
+/// Aggregates are derived projections; movements + lots + AssembledBouquet* are the source of truth.
 model ProductStock {
-  productId        String   @id
-  quantityOnHand   Int      @default(0)
-  quantityReserved Int      @default(0)
-  updatedAt        DateTime @updatedAt
+  productId          String   @id
+  /// Unassembled stems physically on the shelf (available + planned reserve).
+  quantityOnHand     Int      @default(0)
+  /// Soft planned reserve for active unassembled order needs.
+  quantityReserved   Int      @default(0)
+  /// Stems currently inside ASSEMBLED physical bouquets (not auto-reallocatable).
+  quantityInBouquets Int      @default(0)
+  updatedAt          DateTime @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -444,12 +472,14 @@ model Supply {
 }
 
 model SupplyItem {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   supplyId          String
   productId         String
   quantity          Int
-  unitPurchasePrice Decimal  @db.Decimal(12, 2)
-  createdAt         DateTime @default(now())
+  unitPurchasePrice Decimal   @db.Decimal(12, 2)
+  /// Optional last usable calendar day; copied to StockLot on post. Null = unknown.
+  usableUntil       DateTime? @db.Date
+  createdAt         DateTime  @default(now())
 
   supply  Supply    @relation(fields: [supplyId], references: [id], onDelete: Cascade)
   product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -472,6 +502,8 @@ model StockLot {
   /// Null for inventory surplus (uncosted). Never fake 0.00.
   unitPurchasePrice Decimal?       @db.Decimal(12, 2)
   receivedAt        DateTime
+  /// Last calendar day the lot may be promised / used (business TZ date). Null = no limit.
+  usableUntil       DateTime?      @db.Date
   createdAt         DateTime       @default(now())
   reversedAt        DateTime?
 
@@ -479,8 +511,10 @@ model StockLot {
   supplyItem    SupplyItem?                   @relation(fields: [supplyItemId], references: [id], onDelete: Restrict)
   inventoryItem InventoryItem?                @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
   allocations   StockMovementLotAllocation[]
+  bouquetLots   AssembledBouquetComponentLot[]
 
   @@index([productId, receivedAt, createdAt])
+  @@index([productId, usableUntil])
   @@index([sourceType])
   @@map("stock_lots")
 }
@@ -560,6 +594,7 @@ model Bouquet {
 
   items BouquetItem[]
   orderItems OrderItem[] @relation("OrderItemBouquet")
+  assembledBouquets AssembledBouquet[] @relation("AssembledBouquetTemplate")
 
   @@index([isActive])
   @@index([name])
@@ -586,9 +621,21 @@ model BouquetItem {
 
 enum OrderStatus {
   NEW
+  /// At least one line is being assembled or partially ready.
+  IN_PROGRESS
+  /// All assembleable units are ASSEMBLED and ready to issue (may be partially issued).
   READY
+  /// Fully issued (or remaining lines written off / cancelled without stock).
   COMPLETED
   CANCELLED
+}
+
+/// Lifecycle of a physical assembled product (WIP / display / issued).
+enum AssembledBouquetStatus {
+  ASSEMBLED
+  DISASSEMBLED
+  ISSUED
+  WRITTEN_OFF
 }
 
 enum FulfillmentType {
@@ -615,7 +662,16 @@ model OrderDailyCounter {
   @@map("order_daily_counters")
 }
 
-/// Commercial order document. Phase 8: reservations + FIFO completion mutate warehouse.
+/// Atomic per-day sequence for AssembledBouquet.number (AB-DDMMYY-NNN).
+model AssembledBouquetDailyCounter {
+  businessDate DateTime @id @db.Date
+  lastNumber   Int
+  updatedAt    DateTime @updatedAt
+
+  @@map("assembled_bouquet_daily_counters")
+}
+
+/// Commercial order document. Reservations + physical assembly / issue mutate warehouse.
 model Order {
   id                       String          @id @default(cuid())
   /// Human-readable business number, e.g. 150926-001. Not a PK.
@@ -645,13 +701,14 @@ model Order {
   discountValue            Decimal?        @db.Decimal(12, 2)
   discountAmount           Decimal         @default(0) @db.Decimal(12, 2)
   total                    Decimal         @db.Decimal(12, 2)
-  /// Snapshot of full FIFO COGS at completion. Null if incomplete / uncosted lots.
+  /// Snapshot of known COGS from issued / directly issued lines. Null if uncosted.
   actualCost               Decimal?        @db.Decimal(12, 2)
-  /// True when completion consumed at least one lot without unitPurchasePrice.
+  /// True when any issue consumed at least one lot without unitPurchasePrice.
   hasUncostedConsumption   Boolean         @default(false)
   version                  Int             @default(1)
   createdByUserId          String
   updatedByUserId          String?
+  inProgressAt             DateTime?
   readyAt                  DateTime?
   completedAt              DateTime?
   cancelledAt              DateTime?
@@ -662,6 +719,7 @@ model Order {
   updatedBy     User?              @relation("OrderUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   items         OrderItem[]
   reservations  StockReservation[]
+  assembledBouquets AssembledBouquet[]
 
   @@index([fulfillmentDate, status])
   @@index([fulfillmentDate, fulfillmentType])
@@ -679,6 +737,8 @@ model OrderItem {
   bouquetId    String?
   nameSnapshot String
   quantity     Int
+  /// How many units of this line were issued directly (PRODUCT) or via AssembledBouquet ISSUE.
+  quantityIssued Int         @default(0)
   unitPrice    Decimal       @db.Decimal(12, 2)
   lineSubtotal Decimal       @db.Decimal(12, 2)
   sortOrder    Int           @default(0)
@@ -688,6 +748,7 @@ model OrderItem {
   product    Product?             @relation("OrderItemProduct", fields: [productId], references: [id], onDelete: Restrict)
   bouquet    Bouquet?             @relation("OrderItemBouquet", fields: [bouquetId], references: [id], onDelete: Restrict)
   components OrderItemComponent[]
+  assembledBouquets AssembledBouquet[]
 
   @@index([orderId])
   @@index([productId])
@@ -716,7 +777,8 @@ model OrderItemComponent {
 }
 
 /// Mutable aggregate FLOWER reservation for an Order (not lot-bound).
-/// Active while Order status is NEW or READY. Removed on COMPLETED/CANCELLED.
+/// Active while Order status is NEW / IN_PROGRESS / READY. Removed on COMPLETED/CANCELLED.
+/// Planned reserve only covers still-unassembled requirements.
 model StockReservation {
   id               String   @id @default(cuid())
   orderId          String
@@ -733,4 +795,92 @@ model StockReservation {
   @@index([productId])
   @@index([orderId])
   @@map("stock_reservations")
+}
+
+/// Physical assembled product (order bouquet, display bouquet, mono/mixed composition).
+/// Distinct from Bouquet template and from commercial OrderItem.
+model AssembledBouquet {
+  id                  String                 @id @default(cuid())
+  /// Human-readable number, e.g. AB-241021-001.
+  number              String                 @unique
+  status              AssembledBouquetStatus @default(ASSEMBLED)
+  orderId             String?
+  orderItemId         String?
+  bouquetTemplateId   String?
+  nameSnapshot        String
+  /// Optimistic concurrency for assemble/adjust/disassemble/issue.
+  version             Int                    @default(1)
+  /// Client idempotency key to prevent duplicate assemble on retry.
+  idempotencyKey      String?                @unique
+  unitCost            Decimal?               @db.Decimal(12, 2)
+  hasUncostedComponents Boolean              @default(false)
+  assembledAt         DateTime               @default(now())
+  assembledByUserId   String
+  disassembledAt      DateTime?
+  disassembledByUserId String?
+  disassembleReason   String?
+  issuedAt            DateTime?
+  issuedByUserId      String?
+  writtenOffAt        DateTime?
+  writtenOffByUserId  String?
+  writeOffReason      String?
+  lastAdjustedAt      DateTime?
+  lastAdjustedByUserId String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  order           Order?   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem       OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  bouquetTemplate Bouquet? @relation("AssembledBouquetTemplate", fields: [bouquetTemplateId], references: [id], onDelete: SetNull)
+  assembledBy     User     @relation("AssembledBouquetAssembler", fields: [assembledByUserId], references: [id], onDelete: Restrict)
+  disassembledBy  User?    @relation("AssembledBouquetDisassembler", fields: [disassembledByUserId], references: [id], onDelete: SetNull)
+  issuedBy        User?    @relation("AssembledBouquetIssuer", fields: [issuedByUserId], references: [id], onDelete: SetNull)
+  writtenOffBy    User?    @relation("AssembledBouquetWriteOff", fields: [writtenOffByUserId], references: [id], onDelete: SetNull)
+  lastAdjustedBy  User?    @relation("AssembledBouquetAdjuster", fields: [lastAdjustedByUserId], references: [id], onDelete: SetNull)
+  components      AssembledBouquetComponent[]
+
+  @@index([status])
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([assembledAt])
+  @@map("assembled_bouquets")
+}
+
+model AssembledBouquetComponent {
+  id                 String   @id @default(cuid())
+  assembledBouquetId String
+  productId          String
+  productNameSnapshot String
+  quantity           Int
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  bouquet AssembledBouquet @relation(fields: [assembledBouquetId], references: [id], onDelete: Cascade)
+  product Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  lots    AssembledBouquetComponentLot[]
+
+  @@unique([assembledBouquetId, productId])
+  @@index([assembledBouquetId])
+  @@index([productId])
+  @@map("assembled_bouquet_components")
+}
+
+/// Lot provenance pinned at assembly (cost + return path). remainingQuantity shrinks on issue/damage.
+model AssembledBouquetComponentLot {
+  id          String   @id @default(cuid())
+  componentId String
+  stockLotId  String
+  quantity    Int
+  /// Still physically inside the bouquet from this lot allocation.
+  remainingQuantity Int
+  unitPurchasePrice Decimal? @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+
+  component AssembledBouquetComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  stockLot  StockLot                  @relation(fields: [stockLotId], references: [id], onDelete: Restrict)
+
+  @@index([componentId])
+  @@index([stockLotId])
+  @@map("assembled_bouquet_component_lots")
 }

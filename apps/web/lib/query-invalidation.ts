@@ -91,6 +91,11 @@ export function keysAfterManualWriteOff(): QueryKey[] {
   return physicalStockKeys();
 }
 
+/** Assemble / disassemble / adjust / issue / direct-issue. */
+export function keysAfterBouquetStockMutation(): QueryKey[] {
+  return [ordersKey(), ...physicalStockKeys(), ['warehouse']];
+}
+
 async function invalidateKeys(qc: QueryClient, keys: QueryKey[]): Promise<void> {
   await Promise.all(keys.map((queryKey) => qc.invalidateQueries({ queryKey })));
 }
@@ -156,4 +161,8 @@ export async function invalidateAfterInventoryCancel(qc: QueryClient): Promise<v
 
 export async function invalidateAfterManualWriteOff(qc: QueryClient): Promise<void> {
   await invalidateKeys(qc, keysAfterManualWriteOff());
+}
+
+export async function invalidateAfterBouquetStockMutation(qc: QueryClient): Promise<void> {
+  await invalidateKeys(qc, keysAfterBouquetStockMutation());
 }

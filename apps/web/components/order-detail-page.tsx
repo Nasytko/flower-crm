@@ -16,14 +16,13 @@ import { changeOrderStatus } from '@/lib/api/orders';
 import { userFacingError } from '@/lib/api/error-messages';
 import { invalidateAfterOrderStatusChange } from '@/lib/query-invalidation';
 import { OrderEditor } from '@/components/order-editor';
+import { OrderAssemblySection } from '@/components/order-assembly-section';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PageHeader } from '@/components/ui/page-header';
 import { StatRow } from '@/components/ui/stat-row';
 import { StickyActionBar } from '@/components/ui/sticky-action-bar';
 import { cn } from '@/lib/utils';
-
-const SHORTAGE_BLOCK_MSG = 'Заказ нельзя отметить готовым: не хватает товара.';
 
 function attentionLabel(attention: OrderDetail['attention']): string | null {
   if (attention === 'overdue') return 'Просрочен';
@@ -35,16 +34,19 @@ function attentionLabel(attention: OrderDetail['attention']): string | null {
 function nextStatuses(status: OrderStatus): OrderStatus[] {
   switch (status) {
     case OrderStatus.NEW:
-      return [OrderStatus.READY, OrderStatus.CANCELLED];
+      return [OrderStatus.IN_PROGRESS, OrderStatus.READY, OrderStatus.CANCELLED];
+    case OrderStatus.IN_PROGRESS:
+      return [OrderStatus.READY, OrderStatus.NEW, OrderStatus.CANCELLED];
     case OrderStatus.READY:
-      return [OrderStatus.COMPLETED, OrderStatus.NEW, OrderStatus.CANCELLED];
+      return [OrderStatus.COMPLETED, OrderStatus.IN_PROGRESS, OrderStatus.NEW, OrderStatus.CANCELLED];
     default:
       return [];
   }
 }
 
 type PendingConfirm =
-  { kind: 'complete'; status: OrderStatus } | { kind: 'cancel'; status: OrderStatus };
+  | { kind: 'complete'; status: OrderStatus }
+  | { kind: 'cancel'; status: OrderStatus };
 
 export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement {
   const { hasPermission } = useAuth();
@@ -62,12 +64,16 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
   const editable = canUpdate && current.status === OrderStatus.NEW;
   const readOnly = !editable;
 
+  const applyOrder = (detail: OrderDetail) => {
+    setCurrent(detail);
+    setVersion(detail.version);
+  };
+
   const statusMutation = useMutation({
     mutationFn: (status: OrderStatus) =>
       changeOrderStatus(current.id, { status, expectedVersion: version }),
     onSuccess: async (detail) => {
-      setCurrent(detail);
-      setVersion(detail.version);
+      applyOrder(detail);
       setError(null);
       setPending(null);
       setMessage(`Статус: ${orderStatusLabelRu(detail.status, detail.fulfillmentType)}`);
@@ -82,12 +88,6 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
   const requestStatus = (status: OrderStatus) => {
     const isComplete = status === OrderStatus.COMPLETED;
     const isCancel = status === OrderStatus.CANCELLED;
-    const isReady = status === OrderStatus.READY;
-    const blockedByShortage = current.hasShortage && (isReady || isComplete);
-    if (blockedByShortage) {
-      setError(SHORTAGE_BLOCK_MSG);
-      return;
-    }
     if (isComplete) {
       setPending({ kind: 'complete', status });
       return;
@@ -113,8 +113,6 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
     const label = orderStatusLabelRu(status, current.fulfillmentType);
     const isComplete = status === OrderStatus.COMPLETED;
     const isCancel = status === OrderStatus.CANCELLED;
-    const isReady = status === OrderStatus.READY;
-    const blockedByShortage = current.hasShortage && (isReady || isComplete);
     return (
       <Button
         key={status}
@@ -122,8 +120,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
         size={fullWidth ? 'default' : 'sm'}
         className={fullWidth ? 'min-h-11 w-full' : undefined}
         variant={isCancel ? 'destructive' : isComplete ? 'default' : 'outline'}
-        disabled={statusMutation.isPending || blockedByShortage}
-        title={blockedByShortage ? SHORTAGE_BLOCK_MSG : undefined}
+        disabled={statusMutation.isPending}
         onClick={() => requestStatus(status)}
       >
         {isCancel
@@ -134,7 +131,9 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
               : 'Готов к выдаче'
             : status === OrderStatus.NEW
               ? 'Вернуть в новые'
-              : label}
+              : status === OrderStatus.IN_PROGRESS
+                ? 'В сборку'
+                : label}
       </Button>
     );
   };
@@ -193,7 +192,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
 
       {!editable && current.status !== OrderStatus.NEW ? (
         <p className="rounded-2xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          Редактирование доступно только для заказов со статусом «Новый».
+          Редактирование состава заказа доступно только в статусе «Новый». Сборка — в блоке ниже.
         </p>
       ) : null}
 
@@ -202,7 +201,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
           <header className="border-b border-border px-5 py-3">
             <h2 className="text-sm font-semibold">Обеспеченность</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Резерв по цветам из снимка состава заказа
+              Плановый резерв по ещё несобранным компонентам
             </p>
           </header>
           <div className="hidden overflow-x-auto md:block">
@@ -277,6 +276,8 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
         </section>
       ) : null}
 
+      <OrderAssemblySection order={current} onOrderUpdated={applyOrder} />
+
       {showCost ? (
         <section className="space-y-2 rounded-[28px] border border-border bg-card px-5 py-4">
           <h2 className="text-sm font-semibold">Фактическая себестоимость</h2>
@@ -316,7 +317,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
       <ConfirmDialog
         open={pending?.kind === 'complete'}
         title={`Завершить заказ ${current.number}?`}
-        description="Заказ будет отмечен выполненным, товар спишется со склада по FIFO."
+        description="Заказ будет отмечен полностью выданным. Сначала выдайте все собранные букеты и товарные позиции."
         confirmLabel="Завершить"
         busy={statusMutation.isPending}
         onCancel={() => setPending(null)}
@@ -329,7 +330,7 @@ export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement
       <ConfirmDialog
         open={pending?.kind === 'cancel'}
         title={`Отменить заказ ${current.number}?`}
-        description="Зарезервированный товар будет освобождён и при необходимости распределён по другим заказам."
+        description="Плановый резерв освободится. Уже собранные букеты останутся в магазине — их можно оставить на витрину, расформировать или списать отдельно."
         confirmLabel="Отменить заказ"
         tone="danger"
         busy={statusMutation.isPending}

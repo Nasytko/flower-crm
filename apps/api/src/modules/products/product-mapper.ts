@@ -38,15 +38,19 @@ export function toStockDto(
   stock: {
     quantityOnHand: number;
     quantityReserved: number;
+    quantityInBouquets?: number;
   } | null,
 ): ProductStockDto | null {
   if (!stock) {
     return null;
   }
+  const quantityInBouquets = stock.quantityInBouquets ?? 0;
   return {
     quantityOnHand: stock.quantityOnHand,
     quantityReserved: stock.quantityReserved,
     availableQuantity: stock.quantityOnHand - stock.quantityReserved,
+    quantityInBouquets,
+    totalPhysical: stock.quantityOnHand + quantityInBouquets,
   };
 }
 
@@ -163,7 +167,11 @@ export function toPublicProduct(
     color?: AttrRow;
     origin?: AttrRow;
     images?: ImageRow[];
-    stock?: { quantityOnHand: number; quantityReserved: number } | null;
+    stock?: {
+      quantityOnHand: number;
+      quantityReserved: number;
+      quantityInBouquets?: number;
+    } | null;
     lots?: Array<{ remainingQuantity: number; unitPurchasePrice: Prisma.Decimal | null }>;
   },
   options: {

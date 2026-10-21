@@ -16,5 +16,8 @@ export const queryKeys = {
   businessTime: ['business-time'] as const,
   orders: (params?: Record<string, unknown>) => ['orders', params ?? {}] as const,
   order: (id: string) => ['orders', id] as const,
+  warehouseStock: ['warehouse', 'stock'] as const,
+  warehouseStockDetail: (productId: string) => ['warehouse', 'stock', productId] as const,
+  assembledBouquet: (id: string) => ['assembled-bouquets', id] as const,
   systemSettings: ['settings', 'system'] as const,
 };

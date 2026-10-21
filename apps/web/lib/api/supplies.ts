@@ -5,6 +5,8 @@ export interface SupplyItemInput {
   productId: string;
   quantity: number;
   unitPurchasePrice: string;
+  /** YYYY-MM-DD or null = unknown (conservative shelf policy). */
+  usableUntil?: string | null;
 }
 
 export async function listSupplies(

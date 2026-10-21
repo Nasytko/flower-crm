@@ -1,5 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  AssembledBouquetStatus,
   AuditAction,
   OrderItemType,
   OrderStatus,
@@ -10,6 +11,8 @@ import { Prisma } from '@erp/database';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
 import type { RequestContext } from '../../common/auth/auth.types';
+import { StockFifoService } from './stock-fifo.service';
+import { isLotSuitableForDate } from './lot-suitability';
 
 type Tx = Prisma.TransactionClient;
 
@@ -26,22 +29,31 @@ type ActiveOrderPriorityRow = {
   createdAt: Date;
 };
 
+const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.NEW,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.READY,
+];
+
 /**
- * Mutable StockReservation engine.
+ * Planned-reserve engine (soft allocation of unassembled on-hand).
  *
- * Lock order (compatible with warehouse mutations):
- * 1. warehouse advisory xact lock (caller)
- * 2. business document (caller)
- * 3. ProductStock FOR UPDATE sorted by productId
- * 4. StockReservation rows (via ProductStock already locked)
- * 5. StockLots FIFO (completion only)
+ * Formulas:
+ *   available = onHand − reserved
+ *   totalPhysical = onHand + inBouquets
  *
- * Preemption: existing reservations are NEVER stolen by newer higher-priority orders.
- * Priority applies only when allocating NEW or RELEASED available stock.
+ * Preemption: full recompute by fulfillment priority — later orders lose reserve
+ * to earlier ones. Suitability: do not promise lots whose usableUntil is before
+ * the order fulfillment date (virtual FEFO capacity; lots are not pinned).
+ *
+ * Physical pick + costing at assembly use StockFifoService (FEFO pick / lot cost).
  */
 @Injectable()
 export class ReservationAllocationService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly stockFifo: StockFifoService,
+  ) {}
 
   /** Aggregate FLOWER requirements from order snapshot (not live Bouquet). */
   buildRequirementsFromItems(
@@ -102,6 +114,57 @@ export class ReservationAllocationService {
     return this.buildRequirementsFromItems(items);
   }
 
+  /**
+   * Open (still unassembled / not direct-issued) FLOWER needs for planned reserve.
+   * Subtracts actual composition of ASSEMBLED+ISSUED bouquets and direct-issued qty.
+   */
+  async loadOpenRequirementsForOrder(tx: Tx, orderId: string): Promise<RequirementMap> {
+    const full = await this.loadRequirementsForOrder(tx, orderId);
+    const consumed = new Map<string, number>();
+
+    const bouquets = await tx.assembledBouquet.findMany({
+      where: {
+        orderId,
+        status: { in: [AssembledBouquetStatus.ASSEMBLED, AssembledBouquetStatus.ISSUED] },
+      },
+      include: { components: true },
+    });
+    for (const b of bouquets) {
+      for (const c of b.components) {
+        consumed.set(c.productId, (consumed.get(c.productId) ?? 0) + c.quantity);
+      }
+    }
+
+    const items = await tx.orderItem.findMany({
+      where: { orderId },
+      include: { product: { select: { type: true } } },
+    });
+    for (const item of items) {
+      if (
+        String(item.itemType) === OrderItemType.PRODUCT &&
+        item.productId &&
+        item.product?.type === ProductType.FLOWER &&
+        item.quantityIssued > 0
+      ) {
+        consumed.set(item.productId, (consumed.get(item.productId) ?? 0) + item.quantityIssued);
+      }
+    }
+
+    const open: RequirementMap = new Map();
+    for (const [productId, req] of full) {
+      const used = consumed.get(productId) ?? 0;
+      const remaining = Math.max(req.required - used, 0);
+      if (remaining > 0) {
+        open.set(productId, {
+          productId,
+          productName: req.productName,
+          required: remaining,
+        });
+      }
+    }
+    return open;
+  }
+
   toRequirementDtos(
     requirements: RequirementMap,
     reservations: Array<{ productId: string; requiredQuantity: number; reservedQuantity: number }>,
@@ -146,10 +209,13 @@ export class ReservationAllocationService {
     }
   }
 
+  isActiveReservationStatus(status: OrderStatus | string): boolean {
+    return ACTIVE_ORDER_STATUSES.includes(status as OrderStatus);
+  }
+
   /**
-   * Reconcile reservations for one order to match snapshot requirements.
-   * Releases excess to ProductStock.quantityReserved, then attempts to fill shortages
-   * for this order from available, then reallocates any released stock globally.
+   * Reconcile one order's reservation rows to open requirements, then globally
+   * reallocate (with preemption) for touched products.
    */
   async reconcileOrderReservations(
     tx: Tx,
@@ -163,7 +229,7 @@ export class ReservationAllocationService {
     if (!order) {
       throw new AppError('ORDER_NOT_FOUND', 'Заказ не найден', {}, HttpStatus.NOT_FOUND);
     }
-    if (order.status !== OrderStatus.NEW && order.status !== OrderStatus.READY) {
+    if (!this.isActiveReservationStatus(order.status)) {
       throw new AppError(
         'ORDER_NOT_EDITABLE',
         'Резервы можно менять только для активных заказов',
@@ -172,22 +238,17 @@ export class ReservationAllocationService {
       );
     }
 
-    const requirements = await this.loadRequirementsForOrder(tx, orderId);
+    const requirements = await this.loadOpenRequirementsForOrder(tx, orderId);
     const existing = await tx.stockReservation.findMany({ where: { orderId } });
     const allProductIds = [
       ...new Set([...requirements.keys(), ...existing.map((e) => e.productId)]),
     ];
     await this.lockProductStocks(tx, allProductIds);
 
-    const releasedProductIds = new Set<string>();
     const existingByProduct = new Map(existing.map((e) => [e.productId, e]));
 
     for (const old of existing) {
       if (!requirements.has(old.productId)) {
-        if (old.reservedQuantity > 0) {
-          await this.adjustReserved(tx, old.productId, -old.reservedQuantity);
-          releasedProductIds.add(old.productId);
-        }
         await tx.stockReservation.delete({ where: { id: old.id } });
       }
     }
@@ -203,28 +264,10 @@ export class ReservationAllocationService {
           HttpStatus.CONFLICT,
         );
       }
-
-      let reserved = cur?.reservedQuantity ?? 0;
-      if (reserved > req.required) {
-        const release = reserved - req.required;
-        await this.adjustReserved(tx, productId, -release);
-        reserved = req.required;
-        releasedProductIds.add(productId);
-      }
-
-      const fresh = await tx.productStock.findUniqueOrThrow({ where: { productId } });
-      const availNow = fresh.quantityOnHand - fresh.quantityReserved;
-      const need = req.required - reserved;
-      if (need > 0 && availNow > 0) {
-        const take = Math.min(need, availNow);
-        await this.adjustReserved(tx, productId, take);
-        reserved += take;
-      }
-
       if (cur) {
         await tx.stockReservation.update({
           where: { id: cur.id },
-          data: { requiredQuantity: req.required, reservedQuantity: reserved },
+          data: { requiredQuantity: req.required, reservedQuantity: 0 },
         });
       } else {
         await tx.stockReservation.create({
@@ -232,20 +275,20 @@ export class ReservationAllocationService {
             orderId,
             productId,
             requiredQuantity: req.required,
-            reservedQuantity: reserved,
+            reservedQuantity: 0,
           },
         });
       }
     }
 
-    if (!options?.skipGlobalReallocate && releasedProductIds.size > 0) {
-      await this.allocateAvailableForProducts(tx, [...releasedProductIds]);
+    if (!options?.skipGlobalReallocate) {
+      await this.reallocateProducts(tx, allProductIds);
     }
 
-    return { releasedProductIds: [...releasedProductIds], requirements };
+    return { releasedProductIds: allProductIds, requirements };
   }
 
-  /** Release all reservations for an order (cancel / pre-completion consume path uses separate consume). */
+  /** Release all reservations for an order (cancel). */
   async releaseAllForOrder(
     tx: Tx,
     orderId: string,
@@ -257,48 +300,53 @@ export class ReservationAllocationService {
     await this.lockProductStocks(tx, productIds);
 
     for (const row of rows) {
-      if (row.reservedQuantity > 0) {
-        await this.adjustReserved(tx, row.productId, -row.reservedQuantity);
-      }
       await tx.stockReservation.delete({ where: { id: row.id } });
     }
 
     if (options?.reallocate !== false) {
-      await this.allocateAvailableForProducts(tx, productIds);
+      await this.reallocateProducts(tx, productIds);
+    } else {
+      await this.syncReservedAggregates(tx, productIds);
     }
     return productIds;
   }
 
   /**
-   * Allocate available stock to shortage reservations by priority.
-   * Caller must hold warehouse advisory lock. ProductStocks will be locked here.
+   * Full recompute of reservedQuantity for products (preemption + suitability).
+   * Caller must hold warehouse advisory lock when onHand may also change.
    */
-  async allocateAvailableForProducts(
+  async reallocateProducts(
     tx: Tx,
     productIds: string[],
     context?: RequestContext,
     actorUserId?: string,
-  ): Promise<{ allocatedTotal: number; productsTouched: string[] }> {
+  ): Promise<{ allocatedTotal: number; productsTouched: string[]; preempted: boolean }> {
     const ids = [...new Set(productIds)].filter(Boolean).sort();
-    if (ids.length === 0) return { allocatedTotal: 0, productsTouched: [] };
+    if (ids.length === 0) {
+      return { allocatedTotal: 0, productsTouched: [], preempted: false };
+    }
 
     await this.lockProductStocks(tx, ids);
 
     let allocatedTotal = 0;
     const productsTouched: string[] = [];
+    let preempted = false;
 
     for (const productId of ids) {
+      const before = await tx.stockReservation.findMany({
+        where: { productId },
+        select: { orderId: true, reservedQuantity: true },
+      });
+      const beforeMap = new Map(before.map((b) => [b.orderId, b.reservedQuantity]));
+
       const stock = await tx.productStock.findUnique({ where: { productId } });
       if (!stock) continue;
-      let available = stock.quantityOnHand - stock.quantityReserved;
-      if (available <= 0) continue;
 
-      const shortages = await tx.$queryRaw<
+      const demands = await tx.$queryRaw<
         Array<{
           id: string;
           orderId: string;
           requiredQuantity: number;
-          reservedQuantity: number;
           fulfillmentDate: Date;
           fulfillmentTimeFrom: string | null;
           createdAt: Date;
@@ -309,7 +357,6 @@ export class ReservationAllocationService {
           r.id,
           r."orderId",
           r."requiredQuantity",
-          r."reservedQuantity",
           o."fulfillmentDate",
           o."fulfillmentTimeFrom",
           o."createdAt",
@@ -317,33 +364,84 @@ export class ReservationAllocationService {
         FROM stock_reservations r
         INNER JOIN orders o ON o.id = r."orderId"
         WHERE r."productId" = ${productId}
-          AND r."requiredQuantity" > r."reservedQuantity"
-          AND o.status IN ('NEW', 'READY')
+          AND r."requiredQuantity" > 0
+          AND o.status IN ('NEW', 'IN_PROGRESS', 'READY')
         ORDER BY
           o."fulfillmentDate" ASC,
           CASE WHEN o."fulfillmentTimeFrom" IS NULL THEN 1 ELSE 0 END ASC,
           o."fulfillmentTimeFrom" ASC NULLS LAST,
           o."createdAt" ASC,
-          o.number ASC
+          o.number ASC,
+          r.id ASC
         FOR UPDATE OF r
       `;
 
+      const lots = await tx.$queryRaw<
+        Array<{
+          id: string;
+          remainingQuantity: number;
+          usableUntil: Date | null;
+          receivedAt: Date;
+        }>
+      >`
+        SELECT id, "remainingQuantity", "usableUntil", "receivedAt"
+        FROM stock_lots
+        WHERE "productId" = ${productId}
+          AND "remainingQuantity" > 0
+          AND "reversedAt" IS NULL
+        ORDER BY
+          CASE WHEN "usableUntil" IS NULL THEN 1 ELSE 0 END ASC,
+          "usableUntil" ASC NULLS LAST,
+          "receivedAt" ASC,
+          "createdAt" ASC,
+          id ASC
+        FOR UPDATE
+      `;
+
+      // Virtual lot pool for suitability simulation (does not pin lots).
+      // Null usableUntil uses conservative shelf window (see lot-suitability.ts).
+      const virtual = lots.map((l) => ({
+        remaining: l.remainingQuantity,
+        usableUntil: l.usableUntil,
+        receivedAt: l.receivedAt,
+      }));
+
       let productAllocated = 0;
-      for (const row of shortages) {
-        if (available <= 0) break;
-        const need = row.requiredQuantity - row.reservedQuantity;
-        const take = Math.min(need, available);
-        if (take <= 0) continue;
+      const onHandCap = stock.quantityOnHand;
+      let usedOnHand = 0;
+
+      for (const row of demands) {
+        let take = 0;
+        const need = row.requiredQuantity;
+        for (const lot of virtual) {
+          if (take >= need || usedOnHand >= onHandCap) break;
+          if (lot.remaining <= 0) continue;
+          if (!isLotSuitableForDate(lot, row.fulfillmentDate)) continue;
+          const room = Math.min(lot.remaining, need - take, onHandCap - usedOnHand);
+          if (room <= 0) continue;
+          lot.remaining -= room;
+          take += room;
+          usedOnHand += room;
+        }
+
         await tx.stockReservation.update({
           where: { id: row.id },
-          data: { reservedQuantity: row.reservedQuantity + take },
+          data: { reservedQuantity: take },
         });
-        await this.adjustReserved(tx, productId, take);
-        available -= take;
         productAllocated += take;
-        allocatedTotal += take;
+
+        const prev = beforeMap.get(row.orderId) ?? 0;
+        if (prev > take) preempted = true;
       }
-      if (productAllocated > 0) productsTouched.push(productId);
+
+      await tx.productStock.update({
+        where: { productId },
+        data: { quantityReserved: productAllocated },
+      });
+
+      // Clear reserved on orphan rows not in demand list (required=0 should not exist).
+      allocatedTotal += productAllocated;
+      if (productAllocated > 0 || before.length > 0) productsTouched.push(productId);
     }
 
     if (allocatedTotal > 0 && context && actorUserId) {
@@ -356,13 +454,62 @@ export class ReservationAllocationService {
           allocatedTotal,
           productsTouched,
           productCount: productsTouched.length,
+          preempted,
         },
         context,
         tx,
       });
     }
+    if (preempted && context && actorUserId) {
+      await this.audit.log({
+        action: AuditAction.STOCK_RESERVATIONS_PREEMPTED,
+        actorUserId,
+        entityType: 'ProductStock',
+        entityId: ids[0] ?? null,
+        metadata: { productsTouched },
+        context,
+        tx,
+      });
+    }
 
-    return { allocatedTotal, productsTouched };
+    return { allocatedTotal, productsTouched, preempted };
+  }
+
+  /** Back-compat alias used by supply/inventory hooks. */
+  async allocateAvailableForProducts(
+    tx: Tx,
+    productIds: string[],
+    context?: RequestContext,
+    actorUserId?: string,
+  ): Promise<{ allocatedTotal: number; productsTouched: string[] }> {
+    const result = await this.reallocateProducts(tx, productIds, context, actorUserId);
+    return { allocatedTotal: result.allocatedTotal, productsTouched: result.productsTouched };
+  }
+
+  async syncReservedAggregates(tx: Tx, productIds: string[]): Promise<void> {
+    const ids = [...new Set(productIds)].filter(Boolean).sort();
+    await this.lockProductStocks(tx, ids);
+    for (const productId of ids) {
+      const sum = await tx.stockReservation.aggregate({
+        where: { productId },
+        _sum: { reservedQuantity: true },
+      });
+      const reserved = sum._sum.reservedQuantity ?? 0;
+      const stock = await tx.productStock.findUnique({ where: { productId } });
+      if (!stock) continue;
+      if (reserved > stock.quantityOnHand) {
+        throw new AppError(
+          'RESERVATION_INVARIANT_VIOLATION',
+          'Нарушение инварианта резерва склада',
+          { productId, reserved, quantityOnHand: stock.quantityOnHand },
+          HttpStatus.CONFLICT,
+        );
+      }
+      await tx.productStock.update({
+        where: { productId },
+        data: { quantityReserved: reserved },
+      });
+    }
   }
 
   async assertNoShortage(tx: Tx, orderId: string): Promise<void> {
@@ -386,36 +533,15 @@ export class ReservationAllocationService {
     }
   }
 
-  private async adjustReserved(tx: Tx, productId: string, delta: number): Promise<void> {
-    if (delta === 0) return;
-    const stock = await tx.productStock.findUnique({ where: { productId } });
-    if (!stock) {
-      throw new AppError(
-        'STOCK_NOT_SUPPORTED',
-        'Складская запись отсутствует',
-        { productId },
-        HttpStatus.CONFLICT,
-      );
-    }
-    const next = stock.quantityReserved + delta;
-    if (next < 0 || next > stock.quantityOnHand) {
-      throw new AppError(
-        'RESERVATION_INVARIANT_VIOLATION',
-        'Нарушение инварианта резерва склада',
-        {
-          productId,
-          quantityOnHand: stock.quantityOnHand,
-          quantityReserved: stock.quantityReserved,
-          delta,
-          nextReserved: next,
-        },
-        HttpStatus.CONFLICT,
-      );
-    }
-    await tx.productStock.update({
-      where: { productId },
-      data: { quantityReserved: next },
+  /**
+   * How many stems of productId this order currently holds in planned reserve.
+   * Used by assembly to detect override of higher-priority reservations.
+   */
+  async reservedForOrder(tx: Tx, orderId: string, productId: string): Promise<number> {
+    const row = await tx.stockReservation.findUnique({
+      where: { orderId_productId: { orderId, productId } },
     });
+    return row?.reservedQuantity ?? 0;
   }
 
   /** Compare priority of two active orders (lower = higher priority). */
@@ -433,5 +559,10 @@ export class ReservationAllocationService {
     const ca = a.createdAt.getTime() - b.createdAt.getTime();
     if (ca !== 0) return ca;
     return a.number.localeCompare(b.number);
+  }
+
+  /** Suitable remaining helper exposed for diagnostics. */
+  async suitableOnHand(tx: Tx, productId: string, fulfillmentDate: Date): Promise<number> {
+    return this.stockFifo.suitableRemainingQuantity(tx, productId, fulfillmentDate);
   }
 }

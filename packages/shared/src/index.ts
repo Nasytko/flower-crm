@@ -65,11 +65,17 @@ export enum Permission {
   ORDERS_VIEW = 'orders.view',
   ORDERS_CREATE = 'orders.create',
   ORDERS_UPDATE = 'orders.update',
-  /** Transition NEW↔READY / READY→COMPLETED. */
+  /** Transition order statuses (incl. IN_PROGRESS / READY / COMPLETED). */
   ORDERS_STATUS = 'orders.status',
   ORDERS_CANCEL = 'orders.cancel',
   /** Apply order discount / unit price override. */
   ORDERS_DISCOUNT = 'orders.discount',
+  /** Assemble / adjust / disassemble physical bouquets. */
+  ORDERS_ASSEMBLE = 'orders.assemble',
+  /** Issue assembled bouquets or direct-issue products. */
+  ORDERS_ISSUE = 'orders.issue',
+  /** Override higher-priority planned reserve when assembling a later order. */
+  ORDERS_RESERVE_OVERRIDE = 'orders.reserve_override',
 
   PURCHASE_PRICE_VIEW = 'purchase_price.view',
 
@@ -92,6 +98,8 @@ const FLORIST_PERMISSIONS: readonly Permission[] = [
   Permission.ORDERS_CREATE,
   Permission.ORDERS_UPDATE,
   Permission.ORDERS_STATUS,
+  Permission.ORDERS_ASSEMBLE,
+  Permission.ORDERS_ISSUE,
 ];
 
 const MANAGER_PERMISSIONS: readonly Permission[] = [
@@ -107,6 +115,7 @@ const MANAGER_PERMISSIONS: readonly Permission[] = [
   Permission.BOUQUETS_MANAGE,
   Permission.ORDERS_CANCEL,
   Permission.ORDERS_DISCOUNT,
+  Permission.ORDERS_RESERVE_OVERRIDE,
   Permission.PURCHASE_PRICE_VIEW,
   Permission.AUDIT_VIEW,
 ];
@@ -243,6 +252,15 @@ export enum AuditAction {
   ORDER_STATUS_CHANGED = 'ORDER_STATUS_CHANGED',
   ORDER_CANCELLED = 'ORDER_CANCELLED',
   STOCK_RESERVATIONS_ALLOCATED = 'STOCK_RESERVATIONS_ALLOCATED',
+  STOCK_RESERVATIONS_PREEMPTED = 'STOCK_RESERVATIONS_PREEMPTED',
+  BOUQUET_ASSEMBLED = 'BOUQUET_ASSEMBLED',
+  BOUQUET_DISASSEMBLED = 'BOUQUET_DISASSEMBLED',
+  BOUQUET_ADJUSTED = 'BOUQUET_ADJUSTED',
+  BOUQUET_ISSUED = 'BOUQUET_ISSUED',
+  BOUQUET_WRITTEN_OFF = 'BOUQUET_WRITTEN_OFF',
+  BOUQUET_LINKED_TO_ORDER = 'BOUQUET_LINKED_TO_ORDER',
+  ORDER_DIRECT_ISSUED = 'ORDER_DIRECT_ISSUED',
+  RESERVE_OVERRIDE_USED = 'RESERVE_OVERRIDE_USED',
 
   PIN_ENABLED = 'PIN_ENABLED',
   PIN_DISABLED = 'PIN_DISABLED',
@@ -375,6 +393,18 @@ export enum StockMovementType {
   RETURN = 'RETURN',
   INVENTORY_ADJUSTMENT = 'INVENTORY_ADJUSTMENT',
   MANUAL_ADJUSTMENT = 'MANUAL_ADJUSTMENT',
+  ASSEMBLE = 'ASSEMBLE',
+  DISASSEMBLE_RETURN = 'DISASSEMBLE_RETURN',
+  DISASSEMBLE_DAMAGE = 'DISASSEMBLE_DAMAGE',
+  ISSUE = 'ISSUE',
+  DIRECT_ISSUE = 'DIRECT_ISSUE',
+}
+
+export enum AssembledBouquetStatus {
+  ASSEMBLED = 'ASSEMBLED',
+  DISASSEMBLED = 'DISASSEMBLED',
+  ISSUED = 'ISSUED',
+  WRITTEN_OFF = 'WRITTEN_OFF',
 }
 
 export enum SupplyStatus {
@@ -455,6 +485,18 @@ export const STOCK_MOVEMENT_TYPE_LABELS_RU: Record<StockMovementType, string> = 
   [StockMovementType.RETURN]: 'Возврат',
   [StockMovementType.INVENTORY_ADJUSTMENT]: 'Инвентаризация',
   [StockMovementType.MANUAL_ADJUSTMENT]: 'Ручная корректировка',
+  [StockMovementType.ASSEMBLE]: 'Сборка букета',
+  [StockMovementType.DISASSEMBLE_RETURN]: 'Возврат из букета',
+  [StockMovementType.DISASSEMBLE_DAMAGE]: 'Списание при разборе',
+  [StockMovementType.ISSUE]: 'Выдача букета',
+  [StockMovementType.DIRECT_ISSUE]: 'Прямая выдача',
+};
+
+export const ASSEMBLED_BOUQUET_STATUS_LABELS_RU: Record<AssembledBouquetStatus, string> = {
+  [AssembledBouquetStatus.ASSEMBLED]: 'Собран',
+  [AssembledBouquetStatus.DISASSEMBLED]: 'Расформирован',
+  [AssembledBouquetStatus.ISSUED]: 'Выдан',
+  [AssembledBouquetStatus.WRITTEN_OFF]: 'Списан',
 };
 
 export const SUPPLY_STATUS_LABELS_RU: Record<SupplyStatus, string> = {
@@ -474,9 +516,14 @@ export const INVENTORY_STATUS_LABELS_RU: Record<InventoryStatus, string> = {
 export type MoneyString = string;
 
 export interface ProductStockDto {
+  /** Unassembled physical (= available + planned reserve). */
   quantityOnHand: number;
   quantityReserved: number;
   availableQuantity: number;
+  /** Inside ASSEMBLED physical bouquets. */
+  quantityInBouquets: number;
+  /** quantityOnHand + quantityInBouquets. */
+  totalPhysical: number;
 }
 
 export interface ProductAttributeValueDto {
@@ -595,6 +642,34 @@ export interface SupplyItemDto {
   quantity: number;
   unitPurchasePrice?: MoneyString;
   lineTotal?: MoneyString;
+  /** ISO date YYYY-MM-DD; null = unknown expiry (conservative shelf policy applies). */
+  usableUntil: string | null;
+}
+
+/**
+ * When StockLot.usableUntil is null, treat the lot as usable only for this many
+ * calendar days after receipt (inclusive of receipt day). Prevents promising
+ * undated flowers to far-future orders. Not written to DB — evaluation only.
+ */
+export const UNKNOWN_LOT_SHELF_DAYS = 3;
+
+/** Add calendar days to a YYYY-MM-DD (UTC date arithmetic). */
+export function addCalendarDaysIso(isoDate: string, days: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d! + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Effective last usable calendar date for promising / suitability checks.
+ * Explicit usableUntil wins; null → receivedAt date + UNKNOWN_LOT_SHELF_DAYS.
+ */
+export function effectiveUsableUntilIso(
+  usableUntil: string | null | undefined,
+  receivedAtIsoDate: string,
+): string {
+  if (usableUntil && /^\d{4}-\d{2}-\d{2}$/.test(usableUntil)) return usableUntil;
+  return addCalendarDaysIso(receivedAtIsoDate.slice(0, 10), UNKNOWN_LOT_SHELF_DAYS);
 }
 
 export interface SupplierListItem {
@@ -786,6 +861,7 @@ export interface BouquetDetail extends BouquetListItem {
 
 export enum OrderStatus {
   NEW = 'NEW',
+  IN_PROGRESS = 'IN_PROGRESS',
   READY = 'READY',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
@@ -808,6 +884,7 @@ export enum DiscountType {
 
 export const ORDER_STATUS_LABELS_RU: Record<OrderStatus, string> = {
   [OrderStatus.NEW]: 'Новый',
+  [OrderStatus.IN_PROGRESS]: 'В сборке',
   [OrderStatus.READY]: 'Готов',
   [OrderStatus.COMPLETED]: 'Завершён',
   [OrderStatus.CANCELLED]: 'Отменён',
@@ -825,6 +902,9 @@ export const DISCOUNT_TYPE_LABELS_RU: Record<DiscountType, string> = {
 
 /** UI label for READY/COMPLETED depending on fulfillment. */
 export function orderStatusLabelRu(status: OrderStatus, fulfillmentType: FulfillmentType): string {
+  if (status === OrderStatus.IN_PROGRESS) {
+    return 'В сборке';
+  }
   if (status === OrderStatus.READY) {
     return fulfillmentType === FulfillmentType.DELIVERY ? 'Готов к доставке' : 'Готов к выдаче';
   }
@@ -852,6 +932,9 @@ export interface OrderItemDto {
   bouquetId: string | null;
   nameSnapshot: string;
   quantity: number;
+  quantityIssued: number;
+  /** Count of physical AssembledBouquet still ASSEMBLED for this line. */
+  quantityAssembled: number;
   unitPrice: MoneyString;
   lineSubtotal: MoneyString;
   sortOrder: number;
@@ -925,16 +1008,111 @@ export interface OrderDetail extends OrderListItem {
   createdByName: string;
   updatedByUserId: string | null;
   updatedByName: string | null;
+  inProgressAt: string | null;
   readyAt: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
   updatedAt: string;
   items: OrderItemDto[];
   requirements: OrderRequirementDto[];
+  /** Physical ASSEMBLED bouquets linked to this order. */
+  assembledBouquets: AssembledBouquetListItem[];
 }
 
 export interface BusinessTimeInfo {
   timeZone: string;
   businessDate: string;
   nowIso: string;
+}
+
+export interface WarehouseStockRowDto {
+  productId: string;
+  productName: string;
+  availableQuantity: number;
+  reservedQuantity: number;
+  quantityInBouquets: number;
+  totalPhysical: number;
+  deficitQuantity: number;
+}
+
+export interface WarehouseStockReserveLineDto {
+  orderId: string;
+  orderNumber: string;
+  fulfillmentDate: string;
+  fulfillmentTimeFrom: string | null;
+  requiredQuantity: number;
+  reservedQuantity: number;
+  shortageQuantity: number;
+}
+
+export interface WarehouseStockBouquetLineDto {
+  assembledBouquetId: string;
+  number: string;
+  orderId: string | null;
+  orderNumber: string | null;
+  quantity: number;
+  assembledAt: string;
+  status: AssembledBouquetStatus;
+  nameSnapshot: string;
+}
+
+export interface WarehouseStockLotLineDto {
+  stockLotId: string;
+  remainingQuantity: number;
+  unitPurchasePrice: MoneyString | null;
+  receivedAt: string;
+  usableUntil: string | null;
+}
+
+export interface WarehouseStockDetailDto {
+  productId: string;
+  productName: string;
+  availableQuantity: number;
+  reservedQuantity: number;
+  quantityInBouquets: number;
+  totalPhysical: number;
+  deficitQuantity: number;
+  reserves: WarehouseStockReserveLineDto[];
+  bouquets: WarehouseStockBouquetLineDto[];
+  freeLots: WarehouseStockLotLineDto[];
+}
+
+export interface AssembledBouquetComponentLotDto {
+  stockLotId: string;
+  quantity: number;
+  remainingQuantity: number;
+  unitPurchasePrice: MoneyString | null;
+}
+
+export interface AssembledBouquetComponentDto {
+  id: string;
+  productId: string;
+  productNameSnapshot: string;
+  quantity: number;
+  sortOrder: number;
+  lots: AssembledBouquetComponentLotDto[];
+}
+
+export interface AssembledBouquetListItem {
+  id: string;
+  number: string;
+  status: AssembledBouquetStatus;
+  orderId: string | null;
+  orderNumber: string | null;
+  orderItemId: string | null;
+  bouquetTemplateId: string | null;
+  nameSnapshot: string;
+  version: number;
+  unitCost: MoneyString | null;
+  hasUncostedComponents: boolean;
+  assembledAt: string;
+  assembledByName: string;
+}
+
+export interface AssembledBouquetDetail extends AssembledBouquetListItem {
+  disassembleReason: string | null;
+  writeOffReason: string | null;
+  issuedAt: string | null;
+  disassembledAt: string | null;
+  components: AssembledBouquetComponentDto[];
 }

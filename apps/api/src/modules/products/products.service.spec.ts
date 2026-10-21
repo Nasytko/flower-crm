@@ -24,7 +24,7 @@ describe('product-mapper', () => {
         isActive: true,
         createdAt: new Date('2026-01-01'),
         updatedAt: new Date('2026-01-01'),
-        stock: { quantityOnHand: 0, quantityReserved: 0 },
+        stock: { quantityOnHand: 0, quantityReserved: 0, quantityInBouquets: 0 },
         lots: [{ remainingQuantity: 10, unitPurchasePrice: new Prisma.Decimal('4.50') }],
       },
       { includePurchasePrice: false },
@@ -49,7 +49,7 @@ describe('product-mapper', () => {
         isActive: true,
         createdAt: new Date('2026-01-01'),
         updatedAt: new Date('2026-01-01'),
-        stock: { quantityOnHand: 10, quantityReserved: 0 },
+        stock: { quantityOnHand: 10, quantityReserved: 0, quantityInBouquets: 0 },
         lots: [
           { remainingQuantity: 5, unitPurchasePrice: new Prisma.Decimal('4.00') },
           { remainingQuantity: 5, unitPurchasePrice: new Prisma.Decimal('6.00') },
@@ -74,7 +74,7 @@ describe('product-mapper', () => {
         isActive: true,
         createdAt: new Date('2026-01-01'),
         updatedAt: new Date('2026-01-01'),
-        stock: { quantityOnHand: 13, quantityReserved: 0 },
+        stock: { quantityOnHand: 13, quantityReserved: 0, quantityInBouquets: 0 },
         lots: [
           { remainingQuantity: 10, unitPurchasePrice: new Prisma.Decimal('4.00') },
           { remainingQuantity: 3, unitPurchasePrice: null },
@@ -193,7 +193,7 @@ describe('ProductsService write-off (unit)', () => {
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
-      stock: { quantityOnHand: 0, quantityReserved: 0 },
+      stock: { quantityOnHand: 0, quantityReserved: 0, quantityInBouquets: 0 },
       lots: [],
     };
     prismaMock.product.create.mockResolvedValue({ id: 'flower-1' });
@@ -305,7 +305,7 @@ describe('ProductsService write-off (unit)', () => {
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
-        stock: { quantityOnHand: 1, quantityReserved: 0 },
+        stock: { quantityOnHand: 1, quantityReserved: 0, quantityInBouquets: 0 },
       },
     ]);
 

@@ -85,6 +85,8 @@ export function BouquetEditor({
                     quantityOnHand: item.availableStock,
                     quantityReserved: 0,
                     availableQuantity: item.availableStock,
+                    quantityInBouquets: 0,
+                    totalPhysical: item.availableStock,
                   }
                 : null,
             createdAt: '',

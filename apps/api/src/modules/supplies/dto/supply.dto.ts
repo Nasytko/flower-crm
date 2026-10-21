@@ -50,6 +50,15 @@ export class SupplyItemInputDto {
   @IsString()
   @MaxLength(20)
   unitPurchasePrice!: string;
+
+  @ApiPropertyOptional({
+    description: 'Last usable calendar day YYYY-MM-DD; omit/null = unknown expiry',
+    nullable: true,
+  })
+  @Transform(({ value }) => emptyToNull(value))
+  @IsOptional()
+  @IsDateString()
+  usableUntil?: string | null;
 }
 
 export class CreateSupplyDto {

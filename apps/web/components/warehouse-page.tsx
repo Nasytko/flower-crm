@@ -51,6 +51,7 @@ import {
   ProductThumb,
 } from '@/components/ui/product-image';
 import { StatRow } from '@/components/ui/stat-row';
+import { WarehouseStockDetailSheet } from '@/components/warehouse-stock-detail-sheet';
 import { userFacingError } from '@/lib/api/error-messages';
 import { cn } from '@/lib/utils';
 
@@ -78,6 +79,7 @@ export function WarehousePage(): ReactElement {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ProductListItem | null>(null);
+  const [stockDetailProductId, setStockDetailProductId] = useState<string | null>(null);
   const [writeOffTarget, setWriteOffTarget] = useState<ProductListItem | null>(null);
   const [historyProduct, setHistoryProduct] = useState<ProductListItem | null>(null);
   const [lightbox, setLightbox] = useState<{
@@ -310,9 +312,10 @@ export function WarehousePage(): ReactElement {
                   <tr className="border-b border-border text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
                     <th className="px-5 py-3 font-medium">Фото</th>
                     <th className="px-3 py-3 font-medium">Название</th>
-                    <th className="px-3 py-3 font-medium">В наличии</th>
-                    <th className="px-3 py-3 font-medium">В резерве</th>
                     <th className="px-3 py-3 font-medium">Доступно</th>
+                    <th className="px-3 py-3 font-medium">Резерв</th>
+                    <th className="px-3 py-3 font-medium">В букетах</th>
+                    <th className="px-3 py-3 font-medium">Всего</th>
                     {canViewPurchase ? (
                       <th className="px-3 py-3 font-medium">Ср. закупка</th>
                     ) : null}
@@ -330,7 +333,11 @@ export function WarehousePage(): ReactElement {
                         className={cn(
                           'border-b border-border/80 transition-colors hover:bg-muted/40',
                           !product.isActive && 'opacity-60',
+                          stock.isFlower && 'cursor-pointer',
                         )}
+                        onClick={() => {
+                          if (stock.isFlower) setStockDetailProductId(product.id);
+                        }}
                       >
                         <td className="px-5 py-3">
                           <ProductThumb
@@ -347,15 +354,22 @@ export function WarehousePage(): ReactElement {
                           />
                         </td>
                         <td className="px-3 py-3">
-                          <div className="font-medium text-foreground">{product.name}</div>
+                          <div className="font-medium text-foreground">
+                            {product.name}
+                            {stock.isFlower ? (
+                              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                подробнее
+                              </span>
+                            ) : null}
+                          </div>
                           <div className="mt-0.5 text-xs text-muted-foreground">
                             {product.sku ?? 'без SKU'}
                             {!product.isActive ? ' · неактивен' : ''}
                           </div>
                         </td>
                         <td className="px-3 py-3">
-                          {stock.isFlower && stock.onHand != null ? (
-                            <StockBadge quantity={stock.onHand} />
+                          {stock.isFlower && stock.available != null ? (
+                            <StockBadge quantity={stock.available} />
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
@@ -367,9 +381,16 @@ export function WarehousePage(): ReactElement {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>
+                        <td className="px-3 py-3 tabular-nums">
+                          {stock.isFlower && stock.inBouquets != null ? (
+                            stock.inBouquets
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-3">
-                          {stock.isFlower && stock.available != null ? (
-                            <StockBadge quantity={stock.available} />
+                          {stock.isFlower && stock.totalPhysical != null ? (
+                            <StockBadge quantity={stock.totalPhysical} />
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
@@ -385,7 +406,10 @@ export function WarehousePage(): ReactElement {
                         <td className="px-3 py-3">
                           <TypeBadge type={product.type} />
                         </td>
-                        <td className="px-5 py-3">
+                        <td
+                          className="px-5 py-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <ProductActions
                             product={product}
                             stockFrozen={stockFrozen}
@@ -420,7 +444,11 @@ export function WarehousePage(): ReactElement {
                     className={cn(
                       'rounded-2xl border border-border/80 px-4 py-3',
                       !product.isActive && 'opacity-60',
+                      stock.isFlower && 'cursor-pointer',
                     )}
+                    onClick={() => {
+                      if (stock.isFlower) setStockDetailProductId(product.id);
+                    }}
                   >
                     <div className="flex items-start gap-3">
                       <ProductThumb
@@ -447,24 +475,28 @@ export function WarehousePage(): ReactElement {
                     </div>
                     <div className="mt-3 space-y-1">
                       <StatRow
-                        label="В наличии"
+                        label="Доступно"
                         value={
-                          stock.isFlower && stock.onHand != null ? (
-                            <StockBadge quantity={stock.onHand} />
+                          stock.isFlower && stock.available != null ? (
+                            <StockBadge quantity={stock.available} />
                           ) : (
                             '—'
                           )
                         }
                       />
                       <StatRow
-                        label="В резерве"
+                        label="Резерв"
                         value={stock.isFlower && stock.reserved != null ? stock.reserved : '—'}
                       />
                       <StatRow
-                        label="Доступно"
+                        label="В букетах"
+                        value={stock.isFlower && stock.inBouquets != null ? stock.inBouquets : '—'}
+                      />
+                      <StatRow
+                        label="Всего"
                         value={
-                          stock.isFlower && stock.available != null ? (
-                            <StockBadge quantity={stock.available} />
+                          stock.isFlower && stock.totalPhysical != null ? (
+                            <StockBadge quantity={stock.totalPhysical} />
                           ) : (
                             '—'
                           )
@@ -482,7 +514,7 @@ export function WarehousePage(): ReactElement {
                         value={product.salePrice != null ? `${product.salePrice} BYN` : '—'}
                       />
                     </div>
-                    <div className="mt-3">
+                    <div className="mt-3" onClick={(e) => e.stopPropagation()}>
                       <ProductActions
                         product={product}
                         stockFrozen={stockFrozen}
@@ -594,6 +626,13 @@ export function WarehousePage(): ReactElement {
       {historyProduct ? (
         <MovementsSheet product={historyProduct} onClose={() => setHistoryProduct(null)} />
       ) : null}
+
+      {stockDetailProductId ? (
+        <WarehouseStockDetailSheet
+          productId={stockDetailProductId}
+          onClose={() => setStockDetailProductId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -617,14 +656,20 @@ function productStock(product: ProductListItem): {
   onHand: number | null | undefined;
   reserved: number | null | undefined;
   available: number | null;
+  inBouquets: number | null;
+  totalPhysical: number | null;
 } {
   const isFlower = product.type === ProductType.FLOWER;
   const onHand = product.stock?.quantityOnHand;
   const reserved = product.stock?.quantityReserved;
+  const inBouquets = product.stock?.quantityInBouquets ?? null;
   const available =
     product.stock?.availableQuantity ??
     (onHand != null && reserved != null ? Math.max(0, onHand - reserved) : null);
-  return { isFlower, onHand, reserved, available };
+  const totalPhysical =
+    product.stock?.totalPhysical ??
+    (onHand != null ? onHand + (inBouquets ?? 0) : null);
+  return { isFlower, onHand, reserved, available, inBouquets, totalPhysical };
 }
 
 function purchaseCostLabel(product: ProductListItem, isFlower: boolean): ReactNode {

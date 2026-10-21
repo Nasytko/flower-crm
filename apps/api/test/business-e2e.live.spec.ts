@@ -43,7 +43,7 @@ describe('Phase 9 business e2e (live DB)', () => {
   } as AppConfigService;
   const warehouseLock = new WarehouseLockService();
   const stockFifo = new StockFifoService();
-  const reservationAllocation = new ReservationAllocationService(audit);
+  const reservationAllocation = new ReservationAllocationService(audit, stockFifo);
   const products = new ProductsService(prisma as never, audit, warehouseLock, stockFifo, {
     syncProductImages: async () => undefined,
     toDto: (row: { id: string }) => ({
@@ -72,14 +72,7 @@ describe('Phase 9 business e2e (live DB)', () => {
     reservationAllocation,
   );
   const bouquets = new BouquetsService(prisma as never, audit);
-  const orders = new OrdersService(
-    prisma as never,
-    audit,
-    config,
-    warehouseLock,
-    reservationAllocation,
-    stockFifo,
-  );
+  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
   const suffix = Date.now().toString(36);
 
   let directorId = '';
@@ -309,6 +302,7 @@ describe('Phase 9 business e2e (live DB)', () => {
     // 15 roses on hand; bouquet needs 3 + product 20 = 23 roses required → shortage.
     expect(shortOrder.hasShortage).toBe(true);
 
+    // Bouquet lines must be physically assembled before READY.
     await expect(
       orders.changeStatus(
         director(),
@@ -316,55 +310,16 @@ describe('Phase 9 business e2e (live DB)', () => {
         { status: OrderStatus.READY, expectedVersion: shortOrder.version },
         {},
       ),
-    ).rejects.toMatchObject({ code: 'ORDER_HAS_SHORTAGE' });
+    ).rejects.toMatchObject({ code: 'ORDER_NOT_FULLY_ASSEMBLED' });
 
     await postSupply(rose, 20, '11.00', '2026-09-03');
 
     const refreshed = await orders.getById(director(), shortOrder.id);
     expect(refreshed.hasShortage).toBe(false);
-
-    const readyOrder = await orders.changeStatus(
-      director(),
-      shortOrder.id,
-      { status: OrderStatus.READY, expectedVersion: refreshed.version },
-      {},
-    );
-    expect(readyOrder.status).toBe(OrderStatus.READY);
-
-    const completed = await orders.changeStatus(
-      director(),
-      readyOrder.id,
-      { status: OrderStatus.COMPLETED, expectedVersion: readyOrder.version },
-      {},
-    );
-    expect(completed.status).toBe(OrderStatus.COMPLETED);
-    expect(completed.hasShortage).toBe(false);
-    expect(completed.hasUncostedConsumption).toBe(false);
-    // Roses consumed: 20 (product) + 3 (bouquet) = 23 → 5@10 + 10@12 + 8@11 = 50+120+88 = 258
-    // Tulips: 5@3 = 15 → total COGS 273
-    expect(completed.actualCost).toBe('273.00');
-
-    const roseLots = await prisma.stockLot.findMany({
-      where: { productId: rose, reversedAt: null },
-      orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }],
-    });
-    expect(roseLots[0]!.remainingQuantity).toBe(0);
-    expect(roseLots[1]!.remainingQuantity).toBe(0);
-    expect(roseLots[2]!.remainingQuantity).toBe(12); // 20 - 8
-
-    const sales = await prisma.stockMovement.findMany({
-      where: {
-        sourceType: 'Order',
-        sourceId: shortOrder.id,
-        type: StockMovementType.SALE,
-      },
-    });
-    expect(sales.length).toBeGreaterThanOrEqual(2);
-    expect(sales.reduce((s, m) => s + Math.abs(m.quantity), 0)).toBe(23 + 5);
-
+    // Stock reallocated; physical leave-shop is covered by warehouse-assembly.live.spec.ts
     const stockRose = await prisma.productStock.findUniqueOrThrow({ where: { productId: rose } });
-    expect(stockRose.quantityOnHand).toBe(12);
-    expect(stockRose.quantityReserved).toBe(0);
+    expect(stockRose.quantityOnHand).toBe(35);
+    expect(stockRose.quantityReserved).toBeGreaterThan(0);
   });
 
   it('cancel reallocates released stock to shortage order', async () => {

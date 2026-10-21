@@ -1,42 +1,32 @@
-# Reservations
+# Reservations (planned reserve)
 
-Mutable `StockReservation` engine for active orders (NEW / READY). Shared by orders, supply post, inventory adjustments, and write-off guards.
+Soft allocation of **unassembled** FLOWER stock to active orders (`NEW` / `IN_PROGRESS` / `READY`).
 
-## Invariants
+## Three stock buckets
 
 For every FLOWER `ProductStock`:
 
 ```
-0 ≤ quantityReserved ≤ quantityOnHand
-available = quantityOnHand − quantityReserved
+available            = quantityOnHand − quantityReserved
+unassembledPhysical  = quantityOnHand          (= available + planned reserve)
+totalPhysical        = quantityOnHand + quantityInBouquets
 ```
 
-Per active order and product:
+- **Доступно** — free unassembled stems.
+- **Плановый резерв** — soft promise to unassembled order needs (not lot-pinned).
+- **В готовых букетах** — stems inside `AssembledBouquet` with status `ASSEMBLED` (not auto-reallocated).
 
-```
-0 ≤ reservedQuantity ≤ requiredQuantity
-shortageQuantity = requiredQuantity − reservedQuantity
-```
+Aggregates are projections. Source of truth: stock movements + lots + `AssembledBouquetComponent*`.
 
-- Only **FLOWER** lines/components create requirements (SERVICE never reserved).
-- Requirements are built from the **order snapshot**, not live bouquet recipes.
-- Sum of `StockReservation.reservedQuantity` for a product equals `ProductStock.quantityReserved`.
+## Open requirements
 
-## Lock order (deadlock-safe)
+Planned reserve covers only **still-open** needs:
 
-Compatible with other warehouse mutations:
+`required = snapshot need − components in ASSEMBLED/ISSUED bouquets − direct-issued PRODUCT qty`
 
-1. Warehouse advisory xact lock (`WarehouseLockService` / `beginStockMutation` when mutating onHand)
-2. Business document row (order / supply / inventory) — caller
-3. `ProductStock` rows `FOR UPDATE`, sorted by `productId`
-4. `StockReservation` rows (via locked stock / `FOR UPDATE OF r` in allocate query)
-5. `StockLot` rows FIFO (`receivedAt`, `createdAt`, `id`) — completion / write-off only
+## Preemption
 
-Never lock lots before stocks; never lock stocks in non-sorted product id order across transactions.
-
-## Allocation rules
-
-**No preemption.** Existing reservations are never reduced to satisfy a higher-priority shortage. Priority applies only when distributing **new or released** available stock.
+Full recompute by fulfillment priority. Later orders **lose** reserve to earlier ones.
 
 Priority (ascending = served first):
 
@@ -44,26 +34,24 @@ Priority (ascending = served first):
 2. Timed before no-time (`fulfillmentTimeFrom` null last)
 3. `fulfillmentTimeFrom`
 4. `createdAt`
-5. `number`
+5. `number` / reservation `id`
 
-Triggers that allocate available → shortages:
+## Lot suitability vs physical pick
 
-- Order create / update reconcile (may fill self, then reallocate released)
-- Supply post
-- Order cancel (release then reallocate)
-- Inventory surplus / other paths that increase available
+- **Promising (reserve):** virtual FEFO capacity — do not promise lots whose *effective* usable date is before the order date.
+- **Null `usableUntil`:** not infinite — see [lot-suitability.md](./lot-suitability.md) (`receivedAt + UNKNOWN_LOT_SHELF_DAYS`).
+- **Physical pick (assemble / direct-issue):** FEFO order (`usableUntil`, then `receivedAt`); **cost** is taken from the selected lots (not a separate FIFO cost layer).
 
-## Lifecycle hooks
+## Assembly / issue
 
-| Event                 | Behavior                                                              |
-| --------------------- | --------------------------------------------------------------------- |
-| Order create/update   | Reconcile required qty; fill from available; release excess           |
-| Order cancel          | Delete reservations; decrease `quantityReserved`; reallocate          |
-| Order → READY         | Assert no shortage                                                    |
-| Order → COMPLETED     | Assert no shortage; FIFO consume reserved; SALE movements; clear rows |
-| Manual write-off      | May only consume `available` (reserved protected)                     |
-| Inventory in progress | Blocks stock mutations including completion consume                   |
+- Assemble moves onHand → inBouquets (`ASSEMBLE`), pins lots, recalculates reserve.
+- Cannot silently consume another order’s higher-priority reserve without `allowReserveOverride` + `ORDERS_RESERVE_OVERRIDE` + audit.
+- Issue / direct-issue finally leave the shop (`ISSUE` / `DIRECT_ISSUE`).
+- Cancel releases reserve only — does **not** auto-disassemble.
 
-## API surface (orders)
+## Lock order
 
-List/detail expose `hasShortage`, `shortageProductCount`, and detail `requirements[]` (`product`, need, reserve, shortage). Cost fields (`actualCost`, `grossProfit`, `hasUncostedConsumption`) require `purchase_price.view`.
+1. Warehouse advisory xact lock
+2. Business document
+3. `ProductStock` `FOR UPDATE` (sorted productId)
+4. `StockReservation` / lots as needed
