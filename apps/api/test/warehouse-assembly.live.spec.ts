@@ -68,7 +68,13 @@ describe('Warehouse three-bucket assembly (live DB)', () => {
     warehouseLock,
     reservationAllocation,
   );
-  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
+  const orders = new OrdersService(
+    prisma as never,
+    audit,
+    config,
+    warehouseLock,
+    reservationAllocation,
+  );
   const assembled = new AssembledBouquetService(
     prisma as never,
     warehouseLock,
@@ -492,7 +498,10 @@ describe('Warehouse three-bucket assembly (live DB)', () => {
     await orders.changeStatus(
       director(),
       order2.id,
-      { status: OrderStatus.CANCELLED, expectedVersion: (await orders.getById(director(), order2.id)).version },
+      {
+        status: OrderStatus.CANCELLED,
+        expectedVersion: (await orders.getById(director(), order2.id)).version,
+      },
       {},
     );
     const still = await prisma.assembledBouquet.findUniqueOrThrow({ where: { id: b2.id } });

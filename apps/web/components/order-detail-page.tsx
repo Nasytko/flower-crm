@@ -38,15 +38,19 @@ function nextStatuses(status: OrderStatus): OrderStatus[] {
     case OrderStatus.IN_PROGRESS:
       return [OrderStatus.READY, OrderStatus.NEW, OrderStatus.CANCELLED];
     case OrderStatus.READY:
-      return [OrderStatus.COMPLETED, OrderStatus.IN_PROGRESS, OrderStatus.NEW, OrderStatus.CANCELLED];
+      return [
+        OrderStatus.COMPLETED,
+        OrderStatus.IN_PROGRESS,
+        OrderStatus.NEW,
+        OrderStatus.CANCELLED,
+      ];
     default:
       return [];
   }
 }
 
 type PendingConfirm =
-  | { kind: 'complete'; status: OrderStatus }
-  | { kind: 'cancel'; status: OrderStatus };
+  { kind: 'complete'; status: OrderStatus } | { kind: 'cancel'; status: OrderStatus };
 
 export function OrderDetailPage({ order }: { order: OrderDetail }): ReactElement {
   const { hasPermission } = useAuth();

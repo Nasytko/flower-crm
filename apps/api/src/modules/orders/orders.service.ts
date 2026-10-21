@@ -537,7 +537,8 @@ export class OrdersService {
           status: dto.status,
           updatedByUserId: actor.id,
         };
-        if (dto.status === OrderStatus.IN_PROGRESS) data.inProgressAt = existing.inProgressAt ?? now;
+        if (dto.status === OrderStatus.IN_PROGRESS)
+          data.inProgressAt = existing.inProgressAt ?? now;
         if (dto.status === OrderStatus.READY) data.readyAt = now;
         if (dto.status === OrderStatus.COMPLETED) data.completedAt = now;
         if (dto.status === OrderStatus.CANCELLED) data.cancelledAt = now;
@@ -683,16 +684,8 @@ export class OrdersService {
 
   private assertTransition(from: OrderStatus, to: OrderStatus): void {
     const allowed: Record<OrderStatus, OrderStatus[]> = {
-      [OrderStatus.NEW]: [
-        OrderStatus.IN_PROGRESS,
-        OrderStatus.READY,
-        OrderStatus.CANCELLED,
-      ],
-      [OrderStatus.IN_PROGRESS]: [
-        OrderStatus.READY,
-        OrderStatus.NEW,
-        OrderStatus.CANCELLED,
-      ],
+      [OrderStatus.NEW]: [OrderStatus.IN_PROGRESS, OrderStatus.READY, OrderStatus.CANCELLED],
+      [OrderStatus.IN_PROGRESS]: [OrderStatus.READY, OrderStatus.NEW, OrderStatus.CANCELLED],
       [OrderStatus.READY]: [
         OrderStatus.COMPLETED,
         OrderStatus.IN_PROGRESS,
@@ -1406,9 +1399,8 @@ export class OrdersService {
           {
             productId: r.productId,
             productName:
-              row.items
-                .flatMap((i) => i.components)
-                .find((c) => c.productId === r.productId)?.productNameSnapshot ??
+              row.items.flatMap((i) => i.components).find((c) => c.productId === r.productId)
+                ?.productNameSnapshot ??
               row.items.find((i) => i.productId === r.productId)?.nameSnapshot ??
               r.productId,
             required: r.requiredQuantity,

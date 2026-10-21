@@ -62,7 +62,13 @@ describe('Phase 8 reservations (live DB)', () => {
     warehouseLock,
     reservationAllocation,
   );
-  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
+  const orders = new OrdersService(
+    prisma as never,
+    audit,
+    config,
+    warehouseLock,
+    reservationAllocation,
+  );
   const stockBalance = new StockBalanceService();
   const assembled = new AssembledBouquetService(
     prisma as never,
@@ -443,14 +449,7 @@ describe('Phase 8 reservations (live DB)', () => {
     expect(created.hasShortage).toBe(false);
 
     const itemId = created.items[0]!.id;
-    await assembled.directIssueOrderItem(
-      director(),
-      created.id,
-      itemId,
-      8,
-      created.version,
-      {},
-    );
+    await assembled.directIssueOrderItem(director(), created.id, itemId, 8, created.version, {});
     const afterIssue = await orders.getById(director(), created.id);
     // May already be COMPLETED if fully issued
     if (afterIssue.status !== OrderStatus.COMPLETED) {

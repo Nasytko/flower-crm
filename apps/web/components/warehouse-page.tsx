@@ -406,10 +406,7 @@ export function WarehousePage(): ReactElement {
                         <td className="px-3 py-3">
                           <TypeBadge type={product.type} />
                         </td>
-                        <td
-                          className="px-5 py-3"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
                           <ProductActions
                             product={product}
                             stockFrozen={stockFrozen}
@@ -667,8 +664,7 @@ function productStock(product: ProductListItem): {
     product.stock?.availableQuantity ??
     (onHand != null && reserved != null ? Math.max(0, onHand - reserved) : null);
   const totalPhysical =
-    product.stock?.totalPhysical ??
-    (onHand != null ? onHand + (inBouquets ?? 0) : null);
+    product.stock?.totalPhysical ?? (onHand != null ? onHand + (inBouquets ?? 0) : null);
   return { isFlower, onHand, reserved, available, inBouquets, totalPhysical };
 }
 

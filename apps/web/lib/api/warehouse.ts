@@ -10,13 +10,13 @@ export async function listWarehouseStock(): Promise<WarehouseStockRowDto[]> {
   return apiFetch<WarehouseStockRowDto[]>('/api/v1/warehouse/stock');
 }
 
-export async function getWarehouseStockDetail(
-  productId: string,
-): Promise<WarehouseStockDetailDto> {
+export async function getWarehouseStockDetail(productId: string): Promise<WarehouseStockDetailDto> {
   return apiFetch<WarehouseStockDetailDto>(`/api/v1/warehouse/stock/${productId}`);
 }
 
-export async function listAssembledBouquets(productId?: string): Promise<AssembledBouquetListItem[]> {
+export async function listAssembledBouquets(
+  productId?: string,
+): Promise<AssembledBouquetListItem[]> {
   const qs = productId ? `?productId=${encodeURIComponent(productId)}` : '';
   return apiFetch<AssembledBouquetListItem[]>(`/api/v1/assembled-bouquets${qs}`);
 }
@@ -36,7 +36,9 @@ export type AssembleBouquetInput = {
   expectedOrderVersion?: number;
 };
 
-export async function assembleBouquet(input: AssembleBouquetInput): Promise<AssembledBouquetDetail> {
+export async function assembleBouquet(
+  input: AssembleBouquetInput,
+): Promise<AssembledBouquetDetail> {
   return apiFetch<AssembledBouquetDetail>('/api/v1/assembled-bouquets', {
     method: 'POST',
     body: JSON.stringify(input),

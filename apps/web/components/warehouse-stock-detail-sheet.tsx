@@ -2,11 +2,7 @@
 
 import { useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import {
-  UNKNOWN_LOT_SHELF_DAYS,
-  effectiveUsableUntilIso,
-  Permission,
-} from '@erp/shared';
+import { UNKNOWN_LOT_SHELF_DAYS, effectiveUsableUntilIso, Permission } from '@erp/shared';
 import { useAuth } from '@/lib/auth/auth-context';
 import { getWarehouseStockDetail } from '@/lib/api/warehouse';
 import { queryKeys } from '@/lib/query-keys';
@@ -57,9 +53,7 @@ export function WarehouseStockDetailSheet({
       >
         <header className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">
-              {detail?.productName ?? 'Остатки'}
-            </h2>
+            <h2 className="text-lg font-semibold">{detail?.productName ?? 'Остатки'}</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Расшифровка: доступно, резерв, букеты, партии
             </p>
@@ -175,7 +169,9 @@ export function WarehouseStockDetailSheet({
                         className="rounded-xl border border-border/80 px-3 py-2 text-sm"
                       >
                         <div className="flex flex-wrap justify-between gap-2">
-                          <span className="font-medium tabular-nums">{lot.remainingQuantity} шт.</span>
+                          <span className="font-medium tabular-nums">
+                            {lot.remainingQuantity} шт.
+                          </span>
                           <span className="text-xs text-muted-foreground">
                             поступление {formatRuDate(receivedIso)}
                           </span>
@@ -184,9 +180,7 @@ export function WarehouseStockDetailSheet({
                           {unknown
                             ? `Годен до: не указан (оценка ${formatRuDate(effective)})`
                             : `Годен до: ${formatRuDate(lot.usableUntil)}`}
-                          {lot.unitPurchasePrice != null
-                            ? ` · ${lot.unitPurchasePrice} BYN`
-                            : ''}
+                          {lot.unitPurchasePrice != null ? ` · ${lot.unitPurchasePrice} BYN` : ''}
                         </p>
                       </li>
                     );

@@ -57,9 +57,8 @@ export function AssembledBouquetPanel({
   const [disassembleLines, setDisassembleLines] = useState<
     Array<{ productId: string; name: string; total: number; returnQty: string; damageQty: string }>
   >([]);
-  const [adjustLines, setAdjustLines] = useState<
-    Array<{ productId: string; name: string; quantity: string; damageQty: string }>
-  >();
+  const [adjustLines, setAdjustLines] =
+    useState<Array<{ productId: string; name: string; quantity: string; damageQty: string }>>();
 
   useEffect(() => {
     if (!detail) return;
@@ -139,10 +138,7 @@ export function AssembledBouquetPanel({
   });
 
   const busy =
-    issueMut.isPending ||
-    disassembleMut.isPending ||
-    adjustMut.isPending ||
-    writeOffMut.isPending;
+    issueMut.isPending || disassembleMut.isPending || adjustMut.isPending || writeOffMut.isPending;
 
   const isAssembled = detail?.status === AssembledBouquetStatus.ASSEMBLED;
 
@@ -256,8 +252,8 @@ export function AssembledBouquetPanel({
         <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-4">
           <p className="text-sm font-medium">Расформирование</p>
           <p className="text-xs text-muted-foreground">
-            Укажите, сколько цветов вернуть на полку и сколько списать как повреждённые. Сумма должна
-            совпадать с составом.
+            Укажите, сколько цветов вернуть на полку и сколько списать как повреждённые. Сумма
+            должна совпадать с составом.
           </p>
           {disassembleLines.map((l) => (
             <div key={l.productId} className="grid gap-2 sm:grid-cols-[1fr_5rem_5rem]">
@@ -300,7 +296,11 @@ export function AssembledBouquetPanel({
           ))}
           <div>
             <Label>Причина</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Например: срочный заказ" />
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Например: срочный заказ"
+            />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button

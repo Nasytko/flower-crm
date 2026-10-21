@@ -17,14 +17,19 @@ import { assembleBouquet, directIssueOrderItem } from '@/lib/api/warehouse';
 import { userFacingError } from '@/lib/api/error-messages';
 import { ApiClientError } from '@/lib/api/client';
 import { invalidateAfterBouquetStockMutation } from '@/lib/query-invalidation';
-import { AssembledBouquetPanel, AssembledBouquetStatusBadge } from '@/components/assembled-bouquet-panel';
+import {
+  AssembledBouquetPanel,
+  AssembledBouquetStatusBadge,
+} from '@/components/assembled-bouquet-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatRow } from '@/components/ui/stat-row';
 import { cn } from '@/lib/utils';
 
-function plannedComponents(item: OrderItemDto): Array<{ productId: string; name: string; quantity: number }> {
+function plannedComponents(
+  item: OrderItemDto,
+): Array<{ productId: string; name: string; quantity: number }> {
   if (item.itemType === OrderItemType.BOUQUET) {
     return item.components
       .filter((c) => c.productTypeSnapshot === ProductType.FLOWER)
@@ -68,8 +73,7 @@ export function OrderAssemblySection({
   const [allowOverride, setAllowOverride] = useState(false);
   const [pendingOverride, setPendingOverride] = useState(false);
 
-  const terminal =
-    order.status === OrderStatus.COMPLETED || order.status === OrderStatus.CANCELLED;
+  const terminal = order.status === OrderStatus.COMPLETED || order.status === OrderStatus.CANCELLED;
 
   const assembledByItem = useMemo(() => {
     const map = new Map<string, AssembledBouquetListItem[]>();
@@ -110,7 +114,10 @@ export function OrderAssemblySection({
       const planned = plannedComponents(item);
       const components = planned.map((c) => ({
         productId: c.productId,
-        quantity: Math.max(1, Number.parseInt(draftQty[c.productId] ?? String(c.quantity), 10) || c.quantity),
+        quantity: Math.max(
+          1,
+          Number.parseInt(draftQty[c.productId] ?? String(c.quantity), 10) || c.quantity,
+        ),
       }));
       const idempotencyKey = `order-${order.id}-item-${item.id}-n${item.quantityAssembled}-${order.version}`;
       return assembleBouquet({
@@ -343,13 +350,14 @@ export function OrderAssemblySection({
                   )}
                 </div>
               ) : null}
-
             </div>
           );
         })}
 
         {(order.assembledBouquets ?? []).filter((b) => !b.orderItemId).length > 0 ? (
-          <div className="text-xs text-muted-foreground">Витринные букеты смотрите в расшифровке склада.</div>
+          <div className="text-xs text-muted-foreground">
+            Витринные букеты смотрите в расшифровке склада.
+          </div>
         ) : null}
 
         {selectedBouquetId ? (

@@ -1,10 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  UNKNOWN_LOT_SHELF_DAYS,
-  addCalendarDaysIso,
-  effectiveUsableUntilIso,
-} from '@erp/shared';
+import { UNKNOWN_LOT_SHELF_DAYS, addCalendarDaysIso, effectiveUsableUntilIso } from '@erp/shared';
 
 describe('effectiveUsableUntilIso (shared policy)', () => {
   it('keeps explicit usableUntil', () => {

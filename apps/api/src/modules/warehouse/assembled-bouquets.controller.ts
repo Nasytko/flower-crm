@@ -32,10 +32,7 @@ export class AssembledBouquetsController {
   @Get()
   @RequirePermissions(Permission.ORDERS_VIEW)
   @ApiOperation({ summary: 'List assembled bouquets; optional ?productId= filter' })
-  listByProduct(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query('productId') productId?: string,
-  ) {
+  listByProduct(@CurrentUser() user: AuthenticatedUser, @Query('productId') productId?: string) {
     if (!productId) return this.service.listDisplay(user);
     return this.service.listContainingProduct(productId, user);
   }

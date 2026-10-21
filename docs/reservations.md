@@ -38,7 +38,7 @@ Priority (ascending = served first):
 
 ## Lot suitability vs physical pick
 
-- **Promising (reserve):** virtual FEFO capacity — do not promise lots whose *effective* usable date is before the order date.
+- **Promising (reserve):** virtual FEFO capacity — do not promise lots whose _effective_ usable date is before the order date.
 - **Null `usableUntil`:** not infinite — see [lot-suitability.md](./lot-suitability.md) (`receivedAt + UNKNOWN_LOT_SHELF_DAYS`).
 - **Physical pick (assemble / direct-issue):** FEFO order (`usableUntil`, then `receivedAt`); **cost** is taken from the selected lots (not a separate FIFO cost layer).
 

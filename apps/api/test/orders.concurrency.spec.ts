@@ -61,7 +61,13 @@ describe('Orders concurrency (live DB)', () => {
     reservationAllocation,
   );
   const bouquets = new BouquetsService(prisma as never, audit);
-  const orders = new OrdersService(prisma as never, audit, config, warehouseLock, reservationAllocation);
+  const orders = new OrdersService(
+    prisma as never,
+    audit,
+    config,
+    warehouseLock,
+    reservationAllocation,
+  );
   const suffix = Date.now().toString(36);
 
   let directorId = '';

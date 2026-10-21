@@ -93,7 +93,12 @@ export class AssembledBouquetService {
       include: this.detailInclude,
     });
     if (!row) {
-      throw new AppError('ASSEMBLED_BOUQUET_NOT_FOUND', 'Букет не найден', {}, HttpStatus.NOT_FOUND);
+      throw new AppError(
+        'ASSEMBLED_BOUQUET_NOT_FOUND',
+        'Букет не найден',
+        {},
+        HttpStatus.NOT_FOUND,
+      );
     }
     return this.toDetail(row, actor);
   }
@@ -138,12 +143,7 @@ export class AssembledBouquetService {
     this.requirePermission(actor, Permission.ORDERS_ASSEMBLE);
 
     if (!input.components?.length) {
-      throw new AppError(
-        'VALIDATION_ERROR',
-        'Укажите состав букета',
-        {},
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new AppError('VALIDATION_ERROR', 'Укажите состав букета', {}, HttpStatus.BAD_REQUEST);
     }
     for (const c of input.components) {
       if (!c.productId || c.quantity <= 0) {
@@ -202,10 +202,7 @@ export class AssembledBouquetService {
             ...orderRow,
             status: orderRow.status as OrderStatus,
           };
-          if (
-            order.status === OrderStatus.COMPLETED ||
-            order.status === OrderStatus.CANCELLED
-          ) {
+          if (order.status === OrderStatus.COMPLETED || order.status === OrderStatus.CANCELLED) {
             throw new AppError(
               'ORDER_NOT_EDITABLE',
               'Нельзя собирать букет для завершённого или отменённого заказа',
@@ -213,10 +210,7 @@ export class AssembledBouquetService {
               HttpStatus.CONFLICT,
             );
           }
-          if (
-            input.expectedOrderVersion != null &&
-            order.version !== input.expectedOrderVersion
-          ) {
+          if (input.expectedOrderVersion != null && order.version !== input.expectedOrderVersion) {
             throw new AppError(
               'ORDER_CONFLICT',
               'Заказ был изменён. Обновите страницу.',
@@ -1242,8 +1236,17 @@ export class AssembledBouquetService {
         );
       }
       const order = await tx.order.findUnique({ where: { id: orderId } });
-      if (!order || order.status === OrderStatus.CANCELLED || order.status === OrderStatus.COMPLETED) {
-        throw new AppError('ORDER_NOT_EDITABLE', 'Заказ недоступен для привязки', {}, HttpStatus.CONFLICT);
+      if (
+        !order ||
+        order.status === OrderStatus.CANCELLED ||
+        order.status === OrderStatus.COMPLETED
+      ) {
+        throw new AppError(
+          'ORDER_NOT_EDITABLE',
+          'Заказ недоступен для привязки',
+          {},
+          HttpStatus.CONFLICT,
+        );
       }
 
       await tx.assembledBouquet.update({

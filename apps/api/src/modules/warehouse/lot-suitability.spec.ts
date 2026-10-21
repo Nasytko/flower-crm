@@ -1,9 +1,5 @@
 import { UNKNOWN_LOT_SHELF_DAYS } from '@erp/shared';
-import {
-  effectiveUsableUntilDate,
-  isLotSuitableForDate,
-  isoDateFromDate,
-} from './lot-suitability';
+import { effectiveUsableUntilDate, isLotSuitableForDate, isoDateFromDate } from './lot-suitability';
 
 describe('lot suitability policy', () => {
   it('uses explicit usableUntil when set', () => {
