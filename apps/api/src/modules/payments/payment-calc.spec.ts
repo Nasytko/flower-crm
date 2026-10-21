@@ -84,14 +84,14 @@ describe('computeOrderPaymentSummary', () => {
     expect(s.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
   });
 
-  it('partial refund leaves positive net → PARTIALLY_PAID', () => {
+  it('partial refund leaves positive net → PARTIALLY_REFUNDED with remaining due', () => {
     const s = computeOrderPaymentSummary(D('100.00'), [
       pay(PaymentKind.CHARGE, PaymentStatus.CONFIRMED, '100.00'),
       pay(PaymentKind.REFUND, PaymentStatus.CONFIRMED, '30.00'),
     ]);
     expect(s.netPaid).toBe('70.00');
     expect(s.remainingDue).toBe('30.00');
-    expect(s.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_PAID);
+    expect(s.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
   });
 
   it('PENDING refund does not change money (no fake success)', () => {

@@ -352,10 +352,10 @@ export class OrdersService {
         if (!existing) {
           throw new AppError('ORDER_NOT_FOUND', 'Заказ не найден', {}, HttpStatus.NOT_FOUND);
         }
-        if (existing.status !== OrderStatus.NEW) {
+        if (existing.status === OrderStatus.CANCELLED) {
           throw new AppError(
             'ORDER_NOT_EDITABLE',
-            'Редактировать состав можно только в статусе «Новый».',
+            'Отменённый заказ нельзя редактировать.',
             { status: existing.status },
             HttpStatus.CONFLICT,
           );
@@ -373,10 +373,12 @@ export class OrdersService {
         const wantsItemReplace = dto.items !== undefined;
 
         // Header-only update: never delete/recreate lines (preserves POS snapshots & AB links).
+        // Allowed after confirm (e.g. POS READY) so operators can fix customer/comment fields.
         if (!wantsItemReplace) {
           return this.updateHeaderOnly(tx, actor, existing, dto, context);
         }
 
+        // Composition lock takes precedence over the NEW-status gate (clearer POS error).
         if (compositionLocked) {
           throw new AppError(
             'ORDER_COMPOSITION_LOCKED',
@@ -385,6 +387,15 @@ export class OrdersService {
               source: existing.source,
               hasLinkedAssembled: existing.assembledBouquets.length > 0,
             },
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        if (existing.status !== OrderStatus.NEW) {
+          throw new AppError(
+            'ORDER_NOT_EDITABLE',
+            'Редактировать состав можно только в статусе «Новый».',
+            { status: existing.status },
             HttpStatus.CONFLICT,
           );
         }
@@ -585,7 +596,11 @@ export class OrdersService {
 
     const before = this.auditSnapshot(existing);
     const cas = await tx.order.updateMany({
-      where: { id, version: dto.expectedVersion, status: OrderStatus.NEW },
+      where: {
+        id,
+        version: dto.expectedVersion,
+        status: { not: OrderStatus.CANCELLED },
+      },
       data: {
         version: { increment: 1 },
         customerName:

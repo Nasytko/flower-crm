@@ -60,10 +60,13 @@ export function computePaymentSummaryDecimals(
   const remainingDue = Prisma.Decimal.max(ZERO, orderTotal.minus(netPaid));
 
   let paymentStatus: OrderPaymentStatus;
-  if (netPaid.lessThanOrEqualTo(0) && confirmedRefunded.greaterThan(0)) {
+  if (confirmedRefunded.greaterThan(0) && netPaid.lessThanOrEqualTo(0)) {
     paymentStatus = confirmedRefunded.greaterThanOrEqualTo(confirmedPaid)
       ? OrderPaymentStatus.REFUNDED
       : OrderPaymentStatus.PARTIALLY_REFUNDED;
+  } else if (confirmedRefunded.greaterThan(0) && remainingDue.greaterThan(0)) {
+    // Full (or partial) pay then refund: debt reappears as remainingDue.
+    paymentStatus = OrderPaymentStatus.PARTIALLY_REFUNDED;
   } else if (netPaid.lessThanOrEqualTo(0)) {
     paymentStatus = OrderPaymentStatus.UNPAID;
   } else if (remainingDue.lessThanOrEqualTo(0)) {

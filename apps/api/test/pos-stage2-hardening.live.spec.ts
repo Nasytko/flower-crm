@@ -12,6 +12,7 @@ import {
   ProductType,
   Role,
   StockLotSource,
+  SupplyStatus,
   Unit,
 } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
@@ -29,6 +30,7 @@ import { CashShiftService } from '../src/modules/cash/cash-shift.service';
 import { OrdersService } from '../src/modules/orders/orders.service';
 import { hashPassword } from '../src/common/security/password';
 import { AppError } from '../src/common/errors/app-error';
+import { createTestSupplier, deleteTestSuppliers } from './helpers/live-db';
 
 /**
  * Stage 2 hardening: composition lock, quick-sell retry after stock failure.
@@ -82,10 +84,12 @@ describe('POS stage2 hardening (live DB)', () => {
 
   let directorId = '';
   let ready = false;
+  let supplierId = '';
   const productIds: string[] = [];
   const cartIds: string[] = [];
   const orderIds: string[] = [];
   const shiftIds: string[] = [];
+  const supplyIds: string[] = [];
 
   const director = () =>
     ({
@@ -112,6 +116,8 @@ describe('POS stage2 hardening (live DB)', () => {
       },
     });
     directorId = user.id;
+    const supplier = await createTestSupplier(prisma, `S2 Sup ${suffix}`);
+    supplierId = supplier.id;
     ready = true;
   });
 
@@ -150,9 +156,14 @@ describe('POS stage2 hardening (live DB)', () => {
         .catch(() => undefined);
       await prisma.stockMovement.deleteMany({ where: { productId: id } }).catch(() => undefined);
       await prisma.stockLot.deleteMany({ where: { productId: id } }).catch(() => undefined);
+      await prisma.supplyItem.deleteMany({ where: { productId: id } }).catch(() => undefined);
       await prisma.productStock.deleteMany({ where: { productId: id } }).catch(() => undefined);
       await prisma.product.delete({ where: { id } }).catch(() => undefined);
     }
+    for (const id of supplyIds) {
+      await prisma.supply.delete({ where: { id } }).catch(() => undefined);
+    }
+    await deleteTestSuppliers(prisma, supplierId ? [supplierId] : []);
     if (directorId) await prisma.user.delete({ where: { id: directorId } }).catch(() => undefined);
     await prisma.$disconnect();
   });
@@ -306,20 +317,41 @@ describe('POS stage2 hardening (live DB)', () => {
     expect(paymentsAfterFirst).toBe(1);
     expect(await prisma.order.count({ where: { id: first.orderId } })).toBe(1);
 
-    // Restock so retry can DIRECT_ISSUE.
+    // Restock via SUPPLY lot (inventory lots require inventoryItemId).
+    const maxNum = await prisma.supply.aggregate({ _max: { number: true } });
+    const supply = await prisma.supply.create({
+      data: {
+        number: (maxNum._max.number ?? 0) + 1,
+        status: SupplyStatus.POSTED,
+        documentDate: new Date(),
+        supplierId,
+        supplierName: 'S2 restock',
+        createdByUserId: directorId,
+        postedByUserId: directorId,
+        postedAt: new Date(),
+        items: {
+          create: {
+            productId: flowerId,
+            quantity: 5,
+            unitPurchasePrice: '3.00',
+            lot: {
+              create: {
+                productId: flowerId,
+                sourceType: StockLotSource.SUPPLY,
+                receivedQuantity: 5,
+                remainingQuantity: 5,
+                receivedAt: new Date(),
+                unitPurchasePrice: '3.00',
+              },
+            },
+          },
+        },
+      },
+    });
+    supplyIds.push(supply.id);
     await prisma.productStock.update({
       where: { productId: flowerId },
       data: { quantityOnHand: 5 },
-    });
-    await prisma.stockLot.create({
-      data: {
-        productId: flowerId,
-        sourceType: StockLotSource.INVENTORY,
-        receivedQuantity: 5,
-        remainingQuantity: 5,
-        receivedAt: new Date(),
-        unitPurchasePrice: '3.00',
-      },
     });
 
     const cartAfter = await prisma.posCart.findUniqueOrThrow({ where: { id: cart.id } });
