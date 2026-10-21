@@ -8,7 +8,6 @@ import {
   DiscountType,
   Permission,
   roleHasPermission,
-  StockMovementType,
 } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
 import { OrdersService } from '../src/modules/orders/orders.service';

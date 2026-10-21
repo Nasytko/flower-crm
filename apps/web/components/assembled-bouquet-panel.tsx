@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AssembledBouquetStatus,
@@ -57,13 +57,13 @@ export function AssembledBouquetPanel({
   const [disassembleLines, setDisassembleLines] = useState<
     Array<{ productId: string; name: string; total: number; returnQty: string; damageQty: string }>
   >([]);
-  const [adjustLines, setAdjustLines] =
-    useState<Array<{ productId: string; name: string; quantity: string; damageQty: string }>>();
+  const [adjustLines, setAdjustLines] = useState<
+    Array<{ productId: string; name: string; quantity: string; damageQty: string }>
+  >([]);
 
-  useEffect(() => {
-    if (!detail) return;
+  function startDisassemble(components: AssembledBouquetDetail['components']): void {
     setDisassembleLines(
-      detail.components.map((c) => ({
+      components.map((c) => ({
         productId: c.productId,
         name: c.productNameSnapshot,
         total: c.quantity,
@@ -71,15 +71,20 @@ export function AssembledBouquetPanel({
         damageQty: '0',
       })),
     );
+    setMode('disassemble');
+  }
+
+  function startAdjust(components: AssembledBouquetDetail['components']): void {
     setAdjustLines(
-      detail.components.map((c) => ({
+      components.map((c) => ({
         productId: c.productId,
         name: c.productNameSnapshot,
         quantity: String(c.quantity),
         damageQty: '0',
       })),
     );
-  }, [detail]);
+    setMode('adjust');
+  }
 
   const mutationOpts = {
     onSuccess: async (updated: AssembledBouquetDetail) => {
@@ -120,7 +125,7 @@ export function AssembledBouquetPanel({
         expectedVersion: detail!.version,
         allowReserveOverride: allowOverride && canOverride,
         reason: reason.trim() || undefined,
-        components: (adjustLines ?? []).map((l) => ({
+        components: adjustLines.map((l) => ({
           productId: l.productId,
           quantity: Number.parseInt(l.quantity, 10) || 0,
           damageQuantity: Number.parseInt(l.damageQty, 10) || 0,
@@ -221,7 +226,7 @@ export function AssembledBouquetPanel({
                 size="sm"
                 variant="outline"
                 disabled={busy}
-                onClick={() => setMode('adjust')}
+                onClick={() => startAdjust(detail.components)}
               >
                 Изменить состав
               </Button>
@@ -230,7 +235,7 @@ export function AssembledBouquetPanel({
                 size="sm"
                 variant="outline"
                 disabled={busy}
-                onClick={() => setMode('disassemble')}
+                onClick={() => startDisassemble(detail.components)}
               >
                 Расформировать
               </Button>

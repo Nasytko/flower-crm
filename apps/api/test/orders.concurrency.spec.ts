@@ -1,12 +1,4 @@
-import {
-  Role,
-  ProductType,
-  Unit,
-  OrderItemType,
-  FulfillmentType,
-  OrderStatus,
-  StockMovementType,
-} from '@erp/shared';
+import { Role, ProductType, Unit, OrderItemType, FulfillmentType, OrderStatus } from '@erp/shared';
 import { createPrismaClient } from '@erp/database';
 import { OrdersService } from '../src/modules/orders/orders.service';
 import { AuditService } from '../src/modules/audit/audit.service';

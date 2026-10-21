@@ -5,7 +5,6 @@ import {
   OrderItemType,
   FulfillmentType,
   OrderStatus,
-  StockMovementType,
   StockLotSource,
   InventoryStatus,
 } from '@erp/shared';
